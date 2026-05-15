@@ -13,11 +13,8 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
           - platform: windows-latest
-            target: x86_64-pc-windows-msvc
           - platform: macos-latest
-            target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.platform }}
 
@@ -25,24 +22,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-          key: ${{ matrix.target }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      - name: Install dependencies (Ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libfuse2
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm install
 
       - name: TypeScript type check
         run: npx tsc --noEmit
@@ -50,51 +50,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      # Linux 依赖 - 使用正确的包名
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.0-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev
-
-      # macOS 依赖
-      - name: Install macOS dependencies
-        if: matrix.platform == 'macos-latest'
-        run: |
-          brew install create-dmg
-
-      # 生成默认图标
-      - name: Setup icons
-        run: |
-          mkdir -p src-tauri/icons
-          # 使用纯node方式创建图标
-          node -e "
-            const fs = require('fs');
-            // 创建一个简单的 32x32 PNG 图片
-            const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAWElEQVR42mP4//8/AwMDAwMjIyMDAwMDAyMDAwMTAwMDAwMQhv4/////8zMDAwMjIyMDAwMDAwMTEyMjAyMjAyMjIyMzEyMDAyMjAxMf4HAAoEAgH5xX8YAAAAAElFTkSuQmCC', 'base64');
-            fs.writeFileSync('src-tauri/icons/32x32.png', png);
-            fs.writeFileSync('src-tauri/icons/128x128.png', png);
-            fs.writeFileSync('src-tauri/icons/128x128@2x.png', png);
-            fs.writeFileSync('src-tauri/icons/icon.png', png);
-          "
-
-      # 使用 npm 安装的 tauri-cli 构建
       - name: Build Tauri app
-        run: npx tauri build --target ${{ matrix.target }}
-
-      # 上传构建产物
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: novel-flow-${{ matrix.platform }}
-          path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/**
-            src-tauri/target/${{ matrix.target }}/release/*.exe
-          if-no-files-found: ignore
+          args: --ci
