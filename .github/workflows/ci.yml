@@ -88,13 +88,9 @@ jobs:
           cp src-tauri/icons/icon.png src-tauri/icons/128x128.png 2>/dev/null || true
           cp src-tauri/icons/icon.png src-tauri/icons/128x128@2x.png 2>/dev/null || true
 
-      # 使用 tauri-cli 构建
+      # 使用 npm 安装的 tauri-cli 构建
       - name: Build Tauri app
-        uses: tauri-apps/tauri-cli@v0
-        with:
-          args: build --target ${{ matrix.target }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx tauri build --target ${{ matrix.target }}
 
       # 上传构建产物
       - name: Upload artifacts
