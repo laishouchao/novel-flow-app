@@ -50,13 +50,13 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      # Linux 依赖
+      # Linux 依赖 - 使用正确的包名
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
+            libwebkit2gtk-4.0-dev \
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
@@ -70,23 +70,20 @@ jobs:
         run: |
           brew install create-dmg
 
-      # 生成默认图标（如果不存在）
+      # 生成默认图标
       - name: Setup icons
         run: |
           mkdir -p src-tauri/icons
-          if [ ! -f src-tauri/icons/icon.png ]; then
-            # 创建一个简单的 PNG 图标（32x32）
-            node -e "
-              const fs = require('fs');
-              // 创建一个简单的 32x32 PNG 图片（纯色蓝色方块）
-              const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAWElEQVR42mP4//8/AwMDAwMjIyMDAwMDAyMDAwMTAwMDAwMQhv4/////8zMDAwMjIyMDAwMDAwMTEyMjAyMjAyMjIyMzEyMDAyMjAxMf4HAAoEAgH5xX8YAAAAAElFTkSuQmCC', 'base64');
-              fs.writeFileSync('src-tauri/icons/icon.png', png);
-            "
-          fi
-          # 复制为其他尺寸
-          cp src-tauri/icons/icon.png src-tauri/icons/32x32.png 2>/dev/null || true
-          cp src-tauri/icons/icon.png src-tauri/icons/128x128.png 2>/dev/null || true
-          cp src-tauri/icons/icon.png src-tauri/icons/128x128@2x.png 2>/dev/null || true
+          # 使用纯node方式创建图标
+          node -e "
+            const fs = require('fs');
+            // 创建一个简单的 32x32 PNG 图片
+            const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAWElEQVR42mP4//8/AwMDAwMjIyMDAwMDAyMDAwMTAwMDAwMQhv4/////8zMDAwMjIyMDAwMDAwMTEyMjAyMjAyMjIyMzEyMDAyMjAxMf4HAAoEAgH5xX8YAAAAAElFTkSuQmCC', 'base64');
+            fs.writeFileSync('src-tauri/icons/32x32.png', png);
+            fs.writeFileSync('src-tauri/icons/128x128.png', png);
+            fs.writeFileSync('src-tauri/icons/128x128@2x.png', png);
+            fs.writeFileSync('src-tauri/icons/icon.png', png);
+          "
 
       # 使用 npm 安装的 tauri-cli 构建
       - name: Build Tauri app
@@ -101,15 +98,3 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/**
             src-tauri/target/${{ matrix.target }}/release/*.exe
           if-no-files-found: ignore
-
-      # Windows: 查找 exe 文件
-      - name: Find Windows exe
-        if: matrix.platform == 'windows-latest'
-        run: |
-          ls -la src-tauri/target/x86_64-pc-windows-msvc/release/*.exe 2>/dev/null || echo "No exe found"
-
-      # macOS: 查找 dmg 文件
-      - name: Find macOS dmg
-        if: matrix.platform == 'macos-latest'
-        run: |
-          ls -la src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null || echo "No dmg found"
