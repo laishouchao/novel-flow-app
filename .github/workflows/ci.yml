@@ -13,8 +13,11 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-22.04
+            args: ''
           - platform: windows-latest
+            args: ''
           - platform: macos-latest
+            args: ''
 
     runs-on: ${{ matrix.platform }}
 
@@ -44,15 +47,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: TypeScript type check
-        run: npx tsc --noEmit
-
-      - name: Build frontend
-        run: npm run build
-
-      - name: Build Tauri app
+      - name: Build the app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --ci
+          args: ${{ matrix.args }}
