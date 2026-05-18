@@ -1,6 +1,6 @@
 [package]
 name = "novel-flow"
-version = "0.1.0"
+version = "0.2.0"
 description = "NovelFlow - AI 写作工作台"
 authors = ["you"]
 license = ""

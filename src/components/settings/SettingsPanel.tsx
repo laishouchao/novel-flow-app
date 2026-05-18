@@ -17,7 +17,7 @@ import {
 import Button from '../common/Button';
 import Card, { CardContent } from '../common/Card';
 import Badge from '../common/Badge';
-import { useAppState, useAppDispatch, aiActions } from '../../store';
+import { useAppState, useAppDispatch, aiActions, uiActions } from '../../store';
 import { useToast } from '../common/Toast';
 import { llmService } from '../../services/llm';
 import type { LLMServiceConfig } from '../../services/llm';
@@ -164,12 +164,7 @@ const SettingsPanel: React.FC = () => {
   const [testResults, setTestResults] = useState<Record<string, 'success' | 'fail'>>({});
   const [testErrorDetails, setTestErrorDetails] = useState<Record<string, string>>({});
 
-  const [editorPrefs, setEditorPrefs] = useState<EditorPreferences>({
-    fontSize: 16,
-    lineHeight: 1.8,
-    autoSaveInterval: 30,
-    theme: 'light',
-  });
+  const [editorPrefs, setEditorPrefs] = useState<EditorPreferences>(state.ui.editorPrefs);
 
   const [customStyleName, setCustomStyleName] = useState('');
   const [customStyleDesc, setCustomStyleDesc] = useState('');
@@ -293,8 +288,9 @@ const SettingsPanel: React.FC = () => {
   // ---- 编辑器偏好操作 ----
 
   const handleSaveEditorPrefs = useCallback(() => {
+    dispatch(uiActions.setEditorPrefs(editorPrefs));
     addToast('success', '设置已保存');
-  }, [addToast]);
+  }, [dispatch, addToast, editorPrefs]);
 
   // ---- Tab 定义 ----
 

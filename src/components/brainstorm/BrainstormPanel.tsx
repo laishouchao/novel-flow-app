@@ -129,6 +129,7 @@ const BrainstormPanel: React.FC = () => {
   const [completedDimensions, setCompletedDimensions] = useState<boolean[]>(restoredCompleted);
   const [showPreview, setShowPreview] = useState(false);
   const [previewContent, setPreviewContent] = useState('');
+  const [confirmedProjectData, setConfirmedProjectData] = useState<Record<string, unknown> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const hasLLMConfig = () => {
@@ -325,6 +326,7 @@ const BrainstormPanel: React.FC = () => {
         // 所有维度完成，调用确认（非流式，因为是一次性生成）
         const history = state.project.brainstormMessages;
         const projectData = await pipeline.brainstormConfirm(history);
+        setConfirmedProjectData(projectData as unknown as Record<string, unknown>); // 保存完整数据
 
         // 生成预览内容
         const preview = buildPreviewFromProjectData(projectData);
@@ -354,7 +356,15 @@ const BrainstormPanel: React.FC = () => {
   };
 
   const handleConfirmPreview = () => {
-    dispatch(projectActions.update({ coreSeed: previewContent, status: 'planned', stage: 'outline' }));
+    if (confirmedProjectData) {
+      const updateData: Record<string, unknown> = { ...confirmedProjectData };
+      updateData.coreSeed = (confirmedProjectData.coreSeed as string) ?? previewContent;
+      updateData.status = 'planned';
+      updateData.stage = 'outline';
+      dispatch(projectActions.update(updateData as Partial<import('../../types').NovelProject>));
+    } else {
+      dispatch(projectActions.update({ coreSeed: previewContent, status: 'planned', stage: 'outline' }));
+    }
     dispatch(uiActions.setView('home'));
   };
 

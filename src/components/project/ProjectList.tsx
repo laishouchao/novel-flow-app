@@ -56,8 +56,14 @@ const ProjectList: React.FC = () => {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const projects = useMemo(
-    () => state.project.projects.map(mapProject),
-    [state.project.projects]
+    () => state.project.projects.map(np => {
+      const mapped = mapProject(np);
+      const totalWords = state.project.chapters
+        .filter(ch => ch.projectId === np.id)
+        .reduce((sum, ch) => sum + (ch.wordCount || 0), 0);
+      return { ...mapped, wordCount: totalWords };
+    }),
+    [state.project.projects, state.project.chapters]
   );
 
   const handleOpen = (project: Project) => {

@@ -454,10 +454,17 @@ export class LLMService {
 
     const requestId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     let fullContent = '';
+    let streamDone = false;
 
     // 设置事件监听
     let unlistenChunk: UnlistenFn | null = null;
     let unlistenError: UnlistenFn | null = null;
+
+    // 创建一个Promise，当收到done信号时resolve
+    let resolveStreamDone: () => void;
+    const streamDonePromise = new Promise<void>((resolve) => {
+      resolveStreamDone = resolve;
+    });
 
     try {
       // 监听流式数据块
@@ -465,9 +472,10 @@ export class LLMService {
         'stream-chunk',
         (event) => {
           if (event.payload.request_id !== requestId) return;
-          
+
           if (event.payload.done) {
-            // 流结束
+            streamDone = true;
+            resolveStreamDone();
             return;
           }
 
@@ -498,6 +506,8 @@ export class LLMService {
         'stream-error',
         (event) => {
           if (event.payload.request_id !== requestId) return;
+          streamDone = true;
+          resolveStreamDone();
           const err = new LLMServiceError({
             code: 'STREAM_ERROR',
             message: event.payload.error,
@@ -518,14 +528,19 @@ export class LLMService {
         },
       });
 
-      // 等待流完成（简单轮询）
-      await new Promise<void>((resolve) => {
-        const checkDone = () => {
-          // 这里假设流会在一定时间内完成
-          setTimeout(resolve, 100);
-        };
-        checkDone();
-      });
+      // 等待流完成信号（done: true 事件）
+      // invoke返回后Rust端已完成所有事件emit，但JS事件队列可能还没处理完
+      // 给一个短延迟让事件队列处理，然后等待done信号
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      if (!streamDone) {
+        // 如果50ms内还没收到done信号，继续等待（最多30秒）
+        const timeout = setTimeout(() => {
+          streamDone = true;
+          resolveStreamDone();
+        }, 30000);
+        await streamDonePromise;
+        clearTimeout(timeout);
+      }
 
       const cleanedContent = cleanThinkTags(fullContent);
       options.onComplete?.(cleanedContent);

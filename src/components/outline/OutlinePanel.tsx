@@ -147,23 +147,75 @@ const OutlinePanel: React.FC = () => {
       const vol = storeVolumes.find(v => v.id === volumeId);
       if (!vol || !state.project.currentProject) return;
       
-      // 流式生成大纲
-      await pipeline.generateOutlineStream(
+      let streamContent = '';
+      const result = await pipeline.generateOutlineStream(
         state.project.currentProject,
         state.project.characters,
         [vol],
         (token) => {
+          streamContent += token;
           setStreamOutputs(prev => ({
             ...prev,
-            [volumeId]: (prev[volumeId] || '') + token
+            [volumeId]: streamContent
           }));
         }
       );
-      addToast('success', `${vol.title} 大纲生成完成`);
+      
+      // 解析大纲内容并保存到 store
+      // 尝试从生成的内容中提取章节信息
+      const chapterLines = result.content.split('\n').filter(line => 
+        line.match(/^第[一二三四五六七八九十百千\d]+章/)
+      );
+      
+      if (chapterLines.length > 0) {
+        // 删除该卷已有的章节
+        const existingChapters = storeChapters.filter(ch => ch.volumeNumber === vol.volumeNumber);
+        for (const ch of existingChapters) {
+          dispatch(projectActions.deleteChapter(ch.id));
+        }
+        // 创建新章节
+        chapterLines.forEach((line, index) => {
+          const chapter: import('../../types').Chapter = {
+            id: `ch-${Date.now()}-${index}`,
+            projectId: state.project.currentProject!.id,
+            volumeId: vol.id,
+            volumeNumber: vol.volumeNumber,
+            chapterNumber: index + 1,
+            title: line.replace(/^第[一二三四五六七八九十百千\d]+章[：:\s]*/, '').trim() || `第${index + 1}章`,
+            task: line,
+            structureTag: 'setup',
+            status: 'pending',
+            reviewRound: 0,
+            canonChanged: false,
+            draftContent: '',
+            finalContent: '',
+            wordCount: 0,
+            suspenseLevel: 0,
+            plotTwistLevel: 0,
+            foreshadowing: '',
+            summary: '',
+            reviewNotes: '',
+            finalSummary: '',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          dispatch(projectActions.addChapter(chapter));
+        });
+      }
+      
+      addToast('success', `${vol.title} 大纲生成完成，已保存 ${chapterLines.length} 个章节`);
     } catch (error) {
       addToast('error', `大纲生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
     } finally {
       setGenerating(null);
+      // 延迟清理流式输出
+      setTimeout(() => {
+        setStreamOutputs(prev => {
+          const next = { ...prev };
+          delete next[volumeId];
+          return next;
+        });
+      }, 3000);
     }
   };
 
@@ -179,23 +231,82 @@ const OutlinePanel: React.FC = () => {
       const pipeline = new AIPipeline();
       if (!state.project.currentProject) return;
       
-      // 流式生成所有大纲
-      await pipeline.generateOutlineStream(
+      let streamContent = '';
+      const result = await pipeline.generateOutlineStream(
         state.project.currentProject,
         state.project.characters,
         storeVolumes,
         (token) => {
+          streamContent += token;
           setStreamOutputs(prev => ({
             ...prev,
-            all: (prev.all || '') + token
+            all: streamContent
           }));
         }
       );
-      addToast('success', '全部卷大纲生成完成');
+      
+      // 解析大纲内容并保存到 store
+      const chapterLines = result.content.split('\n').filter(line => 
+        line.match(/^第[一二三四五六七八九十百千\d]+章/)
+      );
+      
+      if (chapterLines.length > 0) {
+        // 删除所有已有的章节
+        for (const ch of storeChapters) {
+          dispatch(projectActions.deleteChapter(ch.id));
+        }
+        // 按卷分组创建新章节
+        let chapterIndex = 0;
+        for (const vol of storeVolumes) {
+          const volChapters = chapterLines.filter((_, i) => {
+            // 简单分配：按卷数均分章节
+            const perVol = Math.ceil(chapterLines.length / storeVolumes.length);
+            return i >= (vol.volumeNumber - 1) * perVol && i < vol.volumeNumber * perVol;
+          });
+          volChapters.forEach((line, idx) => {
+            const chapter: import('../../types').Chapter = {
+              id: `ch-${Date.now()}-${chapterIndex}`,
+              projectId: state.project.currentProject!.id,
+              volumeId: vol.id,
+              volumeNumber: vol.volumeNumber,
+              chapterNumber: idx + 1,
+              title: line.replace(/^第[一二三四五六七八九十百千\d]+章[：:\s]*/, '').trim() || `第${idx + 1}章`,
+              task: line,
+              structureTag: 'setup',
+              status: 'pending',
+              reviewRound: 0,
+              canonChanged: false,
+              draftContent: '',
+              finalContent: '',
+              wordCount: 0,
+              suspenseLevel: 0,
+              plotTwistLevel: 0,
+              foreshadowing: '',
+              summary: '',
+              reviewNotes: '',
+              finalSummary: '',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            dispatch(projectActions.addChapter(chapter));
+            chapterIndex++;
+          });
+        }
+      }
+      
+      addToast('success', `全部卷大纲生成完成，已保存 ${chapterLines.length} 个章节`);
     } catch (error) {
       addToast('error', `大纲生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
     } finally {
       setGenerating(null);
+      // 3秒后清理流式输出显示
+      setTimeout(() => {
+        setStreamOutputs(prev => {
+          const next = { ...prev };
+          delete next.all;
+          return next;
+        });
+      }, 3000);
     }
   };
 
@@ -212,7 +323,6 @@ const OutlinePanel: React.FC = () => {
   const handleSaveEdit = (chapterId: string) => {
     dispatch(
       projectActions.updateChapter(chapterId, {
-        title: editTask, // 这里用 editTask 暂存，实际应该分别保存
         task: editTask,
         foreshadowing: editForeshadowing,
       })

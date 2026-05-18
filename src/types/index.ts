@@ -137,7 +137,7 @@ export interface CharacterChange {
 /** 卷 - 分卷管理 */
 export interface Volume {
   id: string;
-  projectId: number;
+  projectId: string;
   volumeNumber: number;
   title: string;
   goal: string;              // 当前卷目标

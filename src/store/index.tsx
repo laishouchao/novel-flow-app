@@ -110,6 +110,13 @@ export interface UIState {
   notifications: Notification[];
   /** 是否处于全屏模式 */
   isFullscreen: boolean;
+  /** 编辑器偏好设置 */
+  editorPrefs: {
+    fontSize: number;
+    lineHeight: number;
+    autoSaveInterval: number;
+    theme: 'light' | 'dark';
+  };
 }
 
 /** 应用全局状态 */
@@ -206,6 +213,7 @@ export type UIAction =
   | { type: 'UI_REMOVE_NOTIFICATION'; payload: string }
   | { type: 'UI_CLEAR_NOTIFICATIONS' }
   | { type: 'UI_SET_FULLSCREEN'; payload: boolean }
+  | { type: 'UI_SET_EDITOR_PREFS'; payload: UIState['editorPrefs'] }
   | { type: 'UI_RESET' };
 
 /** 所有 Action 的联合类型 */
@@ -258,6 +266,12 @@ const initialUIState: UIState = {
   dialog: { type: null, open: false },
   notifications: [],
   isFullscreen: false,
+  editorPrefs: {
+    fontSize: 16,
+    lineHeight: 1.8,
+    autoSaveInterval: 30,
+    theme: 'light',
+  },
 };
 
 export const initialState: AppState = {
@@ -731,6 +745,9 @@ function uiReducer(state: UIState, action: UIAction): UIState {
     case 'UI_SET_FULLSCREEN':
       return { ...state, isFullscreen: action.payload };
 
+    case 'UI_SET_EDITOR_PREFS':
+      return { ...state, editorPrefs: action.payload };
+
     case 'UI_RESET':
       return { ...initialUIState };
 
@@ -772,6 +789,7 @@ function loadState(): Partial<AppState> | null {
     return {
       project: saved.project ? { ...initialProjectState, ...saved.project } : undefined,
       ai: saved.ai ? { ...initialAIState, ...saved.ai } : undefined,
+      ui: saved.ui ? { ...initialUIState, ...saved.ui } : undefined,
     };
   } catch {
     return null;
@@ -783,6 +801,7 @@ function saveState(state: AppState) {
     const toSave = {
       project: state.project,
       ai: state.ai,
+      ui: { editorPrefs: state.ui.editorPrefs },
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
   } catch {
@@ -812,7 +831,7 @@ export function AppProvider({ children }: AppProviderProps) {
         project: { ...initialProjectState, ...preloadedState.project },
         editor: initialEditorState,
         ai: { ...initialAIState, ...preloadedState.ai },
-        ui: initialUIState,
+        ui: { ...initialUIState, ...preloadedState.ui },
       }
     : initialState);
 
@@ -1036,6 +1055,8 @@ export const uiActions = {
     domainAction('ui', { type: 'UI_CLEAR_NOTIFICATIONS' }),
   setFullscreen: (fullscreen: boolean) =>
     domainAction('ui', { type: 'UI_SET_FULLSCREEN', payload: fullscreen }),
+  setEditorPrefs: (prefs: UIState['editorPrefs']) =>
+    domainAction('ui', { type: 'UI_SET_EDITOR_PREFS', payload: prefs }),
   reset: () =>
     domainAction('ui', { type: 'UI_RESET' }),
 };
