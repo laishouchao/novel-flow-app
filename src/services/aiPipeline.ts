@@ -159,7 +159,69 @@ export class AIPipeline {
   // ============================================================
 
   /**
-   * 灵感收束：根据当前维度和历史对话，生成下一个问题
+   * 灵感收束：根据当前维度和历史对话，生成下一个问题（流式版本）
+   *
+   * @param dimension 当前维度 ID（如 'genreTone', 'coreConflict' 等）
+   * @param history 之前的对话历史
+   * @param onToken 流式回调，每收到一个 token 片段就调用
+   * @param projectInfo 已有的项目信息（如已确认的类型、设定等）
+   * @returns AI 生成的下一个问题（含选项）
+   */
+  async brainstormNextQuestionStream(
+    dimension: string,
+    history: BrainstormMessage[],
+    onToken: (token: string) => void,
+    projectInfo?: Partial<NovelProject>,
+  ): Promise<string> {
+    // 获取对应维度的提示词模板
+    const dimensionPrompt = getDimensionPrompt(dimension);
+    if (!dimensionPrompt) {
+      throw new Error(`未找到维度 "${dimension}" 对应的提示词模板`);
+    }
+
+    // 构建上下文摘要：从历史对话中提取已确认的信息
+    const previousContext = this.buildBrainstormContext(history, projectInfo);
+
+    // 填充模板变量
+    const userPrompt = fillPromptTemplate(dimensionPrompt, {
+      previousContext,
+      genre: projectInfo?.genre ?? '待定',
+      conflict: projectInfo?.conflict ?? '待定',
+      protagonist: projectInfo?.coreSeed ?? '待定',
+      worldSetting: projectInfo?.worldBuilding ?? '待定',
+    });
+
+    // 组装消息
+    const messages: ChatMessage[] = [
+      { role: 'system', content: brainstormSystemPrompt },
+      { role: 'user', content: userPrompt },
+    ];
+
+    // 调用 LLM 流式接口
+    let fullContent = '';
+    await this.llm.chatStream(
+      messages,
+      {
+        onToken: (token) => {
+          fullContent += token;
+          onToken(token);
+        },
+        onComplete: (content) => {
+          fullContent = content;
+        },
+        onError: (error) => {
+          throw error;
+        },
+      },
+      undefined,
+      'brainstorm'
+    );
+
+    return fullContent;
+  }
+
+  /**
+   * 灵感收束：根据当前维度和历史对话，生成下一个问题（非流式版本，兼容旧代码）
    *
    * @param dimension 当前维度 ID（如 'genreTone', 'coreConflict' 等）
    * @param history 之前的对话历史

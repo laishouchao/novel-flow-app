@@ -167,6 +167,65 @@ const BrainstormPanel: React.FC = () => {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 添加一个空的 AI 消息占位符，用于流式更新
+  const addStreamAIMessage = (_dimension?: BrainstormDimension): string => {
+    const id = `ai-${Date.now()}`;
+    const msg: ChatMessage = {
+      id,
+      role: 'ai',
+      content: '',
+      options: [],
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, msg]);
+    return id;
+  };
+
+  // 更新流式消息内容
+  const updateStreamMessage = (id: string, content: string) => {
+    setMessages((prev) =>
+      prev.map((msg) => (msg.id === id ? { ...msg, content } : msg))
+    );
+  };
+
+  // 完成流式消息，保存到 store
+  const finalizeStreamMessage = (id: string, content: string, options?: string[], dimension?: BrainstormDimension) => {
+    // 从内容中提取选项（A/B/C/D/E 开头的行）
+    const extractedOptions = options ?? extractOptionsFromContent(content);
+    
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === id
+          ? { ...msg, content, options: extractedOptions }
+          : msg
+      )
+    );
+    
+    dispatch(
+      projectActions.addBrainstormMessage({
+        id,
+        role: 'assistant',
+        content,
+        dimension: dimension ?? DIMENSION_TYPES[currentDimension],
+        confirmed: false,
+        timestamp: new Date().toISOString(),
+      })
+    );
+  };
+
+  // 从内容中提取选项
+  const extractOptionsFromContent = (content: string): string[] => {
+    const lines = content.split('\n');
+    const options: string[] = [];
+    for (const line of lines) {
+      const match = line.match(/^([A-E])[.．、]\s*(.+)$/);
+      if (match) {
+        options.push(`${match[1]}. ${match[2].trim()}`);
+      }
+    }
+    return options;
+  };
+
   const addAIMessage = (content: string, options?: string[], dimension?: BrainstormDimension) => {
     const id = `ai-${Date.now()}`;
     const msg: ChatMessage = {
@@ -243,18 +302,27 @@ const BrainstormPanel: React.FC = () => {
       const nextDim = currentDimension + 1;
 
       if (nextDim < DIMENSIONS.length) {
-        // 调用 AI Pipeline 获取下一个维度的问题
+        // 创建流式消息占位符
+        const messageId = addStreamAIMessage(DIMENSION_TYPES[nextDim]);
+        let streamContent = '';
+
+        // 调用 AI Pipeline 流式获取下一个维度的问题
         const history = state.project.brainstormMessages;
-        const aiResponse = await pipeline.brainstormNextQuestion(
+        await pipeline.brainstormNextQuestionStream(
           DIMENSION_TYPES[nextDim],
           history,
+          (token) => {
+            streamContent += token;
+            updateStreamMessage(messageId, streamContent);
+          },
           state.project.currentProject ?? undefined
         );
 
-        addAIMessage(aiResponse, undefined, DIMENSION_TYPES[nextDim]);
+        // 完成流式消息
+        finalizeStreamMessage(messageId, streamContent, undefined, DIMENSION_TYPES[nextDim]);
         setCurrentDimension(nextDim);
       } else {
-        // 所有维度完成，调用确认
+        // 所有维度完成，调用确认（非流式，因为是一次性生成）
         const history = state.project.brainstormMessages;
         const projectData = await pipeline.brainstormConfirm(history);
 

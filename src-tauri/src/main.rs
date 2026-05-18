@@ -4,13 +4,14 @@
 )]
 
 use serde::{Deserialize, Serialize};
-use tauri::command;
+use tauri::{command, Manager, Window};
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HttpRequest {
     pub url: String,
     pub method: String,
-    pub headers: std::collections::HashMap<String, String>,
+    pub headers: HashMap<String, String>,
     pub body: Option<String>,
 }
 
@@ -18,8 +19,15 @@ pub struct HttpRequest {
 pub struct HttpResponse {
     pub status: u16,
     pub status_text: String,
-    pub headers: std::collections::HashMap<String, String>,
+    pub headers: HashMap<String, String>,
     pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StreamChunk {
+    pub request_id: String,
+    pub chunk: String,
+    pub done: bool,
 }
 
 #[command]
@@ -50,7 +58,7 @@ async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     let status = response.status().as_u16();
     let status_text = response.status().canonical_reason().unwrap_or("Unknown").to_string();
     
-    let mut headers = std::collections::HashMap::new();
+    let mut headers = HashMap::new();
     for (key, value) in response.headers() {
         if let Ok(v) = value.to_str() {
             headers.insert(key.to_string(), v.to_string());
@@ -67,9 +75,72 @@ async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     })
 }
 
+/// 流式HTTP请求，通过事件推送数据
+#[command]
+async fn http_request_stream(
+    window: Window,
+    request_id: String,
+    request: HttpRequest,
+) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    
+    let mut req_builder = client.post(&request.url);
+    
+    for (key, value) in &request.headers {
+        req_builder = req_builder.header(key, value);
+    }
+    
+    if let Some(body) = request.body {
+        req_builder = req_builder.body(body);
+    }
+    
+    let mut response = req_builder.send().await.map_err(|e| e.to_string())?;
+    
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().await.unwrap_or_default();
+        let _ = window.emit("stream-error", serde_json::json!({
+            "request_id": request_id,
+            "error": format!("HTTP {}: {}", status, body)
+        }));
+        return Ok(());
+    }
+    
+    let mut stream = response.bytes_stream();
+    
+    while let Some(chunk_result) = futures::StreamExt::next(&mut stream).await {
+        match chunk_result {
+            Ok(chunk) => {
+                let text = String::from_utf8_lossy(&chunk);
+                let _ = window.emit("stream-chunk", StreamChunk {
+                    request_id: request_id.clone(),
+                    chunk: text.to_string(),
+                    done: false,
+                });
+            }
+            Err(e) => {
+                let _ = window.emit("stream-error", serde_json::json!({
+                    "request_id": request_id,
+                    "error": e.to_string()
+                }));
+                return Ok(());
+            }
+        }
+    }
+    
+    // 发送完成信号
+    let _ = window.emit("stream-chunk", StreamChunk {
+        request_id,
+        chunk: String::new(),
+        done: true,
+    });
+    
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![http_request])
+        .invoke_handler(tauri::generate_handler![http_request, http_request_stream])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
