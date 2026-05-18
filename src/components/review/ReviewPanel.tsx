@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -16,9 +16,12 @@ import {
   Ban,
   Type,
   Swords,
+  Inbox,
 } from 'lucide-react';
 import Button from '../common/Button';
 import Badge from '../common/Badge';
+import { useAppState, useAppDispatch, projectActions, uiActions } from '../../store';
+import type { ReviewResult as StoreReviewResult, ReviewVerdict, ReviewIssueType, ReviewIssueSeverity } from '../../types';
 
 type ReviewResult = 'pass' | 'minor_fix' | 'rewrite_required' | 'reject';
 type GateStatus = 'pass' | 'warning' | 'fail';
@@ -39,13 +42,81 @@ interface Issue {
   suggestion?: string;
 }
 
-interface ReviewPanelProps {
-  result?: ReviewResult;
-  gates?: GateCheck[];
-  issues?: Issue[];
-  onAccept?: () => void;
-  onRewrite?: () => void;
-  onBackToOutline?: () => void;
+/** store ReviewVerdict -> 组件 ReviewResult 映射 */
+function mapVerdict(verdict: ReviewVerdict): ReviewResult {
+  switch (verdict) {
+    case 'pass': return 'pass';
+    case 'minor_fix': return 'minor_fix';
+    case 'rewrite_required': return 'rewrite_required';
+    case 'reject': return 'reject';
+    default: return 'minor_fix';
+  }
+}
+
+/** store ReviewIssueType -> 组件 category 映射 */
+function mapIssueType(type: ReviewIssueType): Issue['category'] {
+  switch (type) {
+    case 'forbidden_word': return 'banned_word';
+    case 'ai_pattern': return 'ai_pattern';
+    case 'layout': return 'formatting';
+    case 'canon': return 'canon_conflict';
+    case 'upgrade': return 'banned_word';
+    case 'repetition': return 'ai_pattern';
+    default: return 'formatting';
+  }
+}
+
+/** store ReviewIssueSeverity -> 组件 severity 映射 */
+function mapSeverity(severity: ReviewIssueSeverity): Issue['severity'] {
+  return severity;
+}
+
+/** 从 store ReviewResult 生成四层闸门检查数据 */
+function buildGatesFromReview(review: StoreReviewResult): GateCheck[] {
+  const hasCanonIssues = review.canonConflicts.length > 0;
+  const hasUpgradeIssue = review.upgradeCheck && review.upgradeCheck !== '通过';
+  const errorCount = review.issues.filter((i) => i.severity === 'error').length;
+
+  return [
+    {
+      name: '读者视角',
+      icon: <Eye size={18} />,
+      status: errorCount === 0 ? 'pass' : 'warning',
+      details: errorCount === 0 ? '叙事流畅，读者代入感良好' : `发现 ${errorCount} 个错误需要修复`,
+    },
+    {
+      name: '禁用词检查',
+      icon: <Ban size={18} />,
+      status: review.issues.some((i) => i.type === 'forbidden_word') ? 'warning' : 'pass',
+      details: review.issues.filter((i) => i.type === 'forbidden_word').length > 0
+        ? `发现 ${review.issues.filter((i) => i.type === 'forbidden_word').length} 个疑似禁用词`
+        : '未发现禁用词',
+    },
+    {
+      name: 'Canon 一致性',
+      icon: <BookOpen size={18} />,
+      status: hasCanonIssues ? 'fail' : 'pass',
+      details: hasCanonIssues ? `发现 ${review.canonConflicts.length} 个 Canon 冲突` : '与前文设定一致，无冲突',
+    },
+    {
+      name: '升级感检查',
+      icon: <TrendingUp size={18} />,
+      status: hasUpgradeIssue ? 'fail' : 'pass',
+      details: hasUpgradeIssue ? review.upgradeCheck : '本章升级感节点正常',
+    },
+  ];
+}
+
+/** 从 store ReviewResult 生成问题列表 */
+function buildIssuesFromReview(review: StoreReviewResult): Issue[] {
+  return review.issues.map((issue, index) => ({
+    id: `issue-${index}`,
+    category: mapIssueType(issue.type),
+    severity: mapSeverity(issue.severity),
+    message: issue.content,
+    line: issue.position,
+    suggestion: review.suggestions[index] || undefined,
+  }));
 }
 
 const resultConfig: Record<ReviewResult, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
@@ -88,92 +159,25 @@ const severityConfig: Record<string, { label: string; variant: 'danger' | 'warni
   info: { label: '提示', variant: 'info' },
 };
 
-const sampleGates: GateCheck[] = [
-  {
-    name: '读者视角',
-    icon: <Eye size={18} />,
-    status: 'pass',
-    details: '叙事流畅，读者代入感良好',
-  },
-  {
-    name: '禁用词检查',
-    icon: <Ban size={18} />,
-    status: 'warning',
-    details: '发现 2 个疑似禁用词',
-  },
-  {
-    name: 'Canon 一致性',
-    icon: <BookOpen size={18} />,
-    status: 'pass',
-    details: '与前文设定一致，无冲突',
-  },
-  {
-    name: '升级感检查',
-    icon: <TrendingUp size={18} />,
-    status: 'fail',
-    details: '本章缺少明确的升级感节点',
-  },
-];
+const ReviewPanel: React.FC = () => {
+  const state = useAppState();
+  const dispatch = useAppDispatch();
 
-const sampleIssues: Issue[] = [
-  {
-    id: '1',
-    category: 'banned_word',
-    severity: 'warning',
-    message: '疑似禁用词："不禁"',
-    line: 12,
-    suggestion: '建议替换为更自然的表达',
-  },
-  {
-    id: '2',
-    category: 'banned_word',
-    severity: 'warning',
-    message: '疑似禁用词："竟然"',
-    line: 25,
-    suggestion: '可替换为"没想到"或"谁知"',
-  },
-  {
-    id: '3',
-    category: 'ai_pattern',
-    severity: 'error',
-    message: '检测到典型AI句式："然而，真正的挑战才刚刚开始"',
-    line: 30,
-    suggestion: '建议改写为更自然的转折表达',
-  },
-  {
-    id: '4',
-    category: 'ai_pattern',
-    severity: 'warning',
-    message: '连续使用"不仅...而且..."句式',
-    line: 15,
-    suggestion: '变换句式结构，避免重复',
-  },
-  {
-    id: '5',
-    category: 'formatting',
-    severity: 'info',
-    message: '段落过长（超过200字），建议适当分段',
-    line: 8,
-    suggestion: '在对话或场景转换处分段',
-  },
-  {
-    id: '6',
-    category: 'formatting',
-    severity: 'info',
-    message: '缺少场景转换标记',
-    line: 20,
-    suggestion: '在时间/地点转换时添加空行或分隔符',
-  },
-];
+  const storeReviewResult = state.editor.reviewResult;
+  const currentChapter = state.editor.currentChapter;
 
-const ReviewPanel: React.FC<ReviewPanelProps> = ({
-  result = 'minor_fix',
-  gates = sampleGates,
-  issues = sampleIssues,
-  onAccept,
-  onRewrite,
-  onBackToOutline,
-}) => {
+  // 从 store 映射数据
+  const { result, gates, issues } = useMemo(() => {
+    if (!storeReviewResult) {
+      return { result: 'minor_fix' as ReviewResult, gates: [] as GateCheck[], issues: [] as Issue[] };
+    }
+    return {
+      result: mapVerdict(storeReviewResult.verdict),
+      gates: buildGatesFromReview(storeReviewResult),
+      issues: buildIssuesFromReview(storeReviewResult),
+    };
+  }, [storeReviewResult]);
+
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set(['banned_word', 'ai_pattern', 'formatting', 'canon_conflict'])
   );
@@ -218,6 +222,53 @@ const ReviewPanel: React.FC<ReviewPanelProps> = ({
     fail: 'bg-red-50 border-red-200',
   };
 
+  const handleAccept = () => {
+    if (currentChapter) {
+      dispatch(projectActions.setChapterStatus(currentChapter.id, 'done'));
+      dispatch(uiActions.setView('editor'));
+    }
+  };
+
+  const handleRewrite = () => {
+    if (currentChapter) {
+      dispatch(projectActions.setChapterStatus(currentChapter.id, 'rewrite'));
+      dispatch(uiActions.setView('editor'));
+    }
+  };
+
+  const handleBackToOutline = () => {
+    dispatch(uiActions.setView('home'));
+  };
+
+  // 空状态：没有审查结果
+  if (!storeReviewResult) {
+    return (
+      <div className="h-full flex flex-col bg-white">
+        <div className="shrink-0 px-5 py-4 border-b border-slate-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Shield size={24} className="text-slate-400" />
+              <div>
+                <h2 className="text-lg font-bold text-slate-700">审查结果</h2>
+                <p className="text-sm text-slate-500 mt-0.5">暂无审查数据</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" icon={<ArrowLeft size={14} />} onClick={handleBackToOutline}>
+                返回大纲
+              </Button>
+            </div>
+          </div>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center text-center px-5">
+          <Inbox size={48} className="text-slate-200 mb-4" />
+          <p className="text-sm text-slate-400 mb-1">暂无审查数据</p>
+          <p className="text-xs text-slate-300">请在编辑器中完成章节草稿后，使用"审查章节"功能生成审查结果</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col bg-white">
       {/* 审查结果概览 */}
@@ -235,17 +286,17 @@ const ReviewPanel: React.FC<ReviewPanelProps> = ({
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" icon={<ArrowLeft size={14} />} onClick={onBackToOutline}>
+            <Button variant="outline" size="sm" icon={<ArrowLeft size={14} />} onClick={handleBackToOutline}>
               返回大纲
             </Button>
-            <Button variant="outline" size="sm" icon={<RotateCcw size={14} />} onClick={onRewrite}>
+            <Button variant="outline" size="sm" icon={<RotateCcw size={14} />} onClick={handleRewrite}>
               重写
             </Button>
             <Button
               variant="primary"
               size="sm"
               icon={<CheckCircle2 size={14} />}
-              onClick={onAccept}
+              onClick={handleAccept}
             >
               接受修改
             </Button>

@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, FolderOpen, Trash2, Clock, BookOpen } from 'lucide-react';
 import Card, { CardContent } from '../common/Card';
 import Button from '../common/Button';
 import Badge, { ProjectStatusBadge } from '../common/Badge';
 import ProgressBar from '../common/ProgressBar';
+import { useAppState, useAppDispatch, projectActions, uiActions } from '../../store';
+import type { NovelProject } from '../../types';
 
 interface Project {
   id: string;
@@ -16,15 +19,6 @@ interface Project {
   updatedAt: string;
 }
 
-interface ProjectListProps {
-  projects?: Project[];
-  onOpen?: (project: Project) => void;
-  onDelete?: (project: Project) => void;
-  onCreateNew?: () => void;
-}
-
-const emptyProjects: Project[] = [];
-
 const genreLabels: Record<string, string> = {
   fantasy: '玄幻',
   urban: '都市',
@@ -35,23 +29,58 @@ const genreLabels: Record<string, string> = {
   other: '其他',
 };
 
-const ProjectList: React.FC<ProjectListProps> = ({
-  projects = emptyProjects,
-  onOpen,
-  onDelete,
-  onCreateNew,
-}) => {
+/** 将 NovelProject 映射为组件内部的 Project 接口 */
+function mapProject(np: NovelProject): Project {
+  return {
+    id: np.id,
+    name: np.name,
+    genre: np.genre,
+    style: np.style?.name || np.style?.preset || '',
+    wordCount: 0, // chapters 在 store 中独立管理，暂用 0
+    targetWordCount: np.targetWords,
+    status: np.status,
+    updatedAt: np.updatedAt
+      ? new Date(np.updatedAt).toLocaleDateString('zh-CN', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        })
+      : '',
+  };
+}
+
+const ProjectList: React.FC = () => {
+  const state = useAppState();
+  const dispatch = useAppDispatch();
+  const navigate = useNavigate();
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  const projects = useMemo(
+    () => state.project.projects.map(mapProject),
+    [state.project.projects]
+  );
+
+  const handleOpen = (project: Project) => {
+    const novelProject = state.project.projects.find((p) => p.id === project.id);
+    if (novelProject) {
+      dispatch(projectActions.setCurrent(novelProject));
+      navigate('/');
+    }
+  };
 
   const handleDelete = (e: React.MouseEvent, project: Project) => {
     e.stopPropagation();
     if (deleteConfirmId === project.id) {
-      onDelete?.(project);
+      dispatch(projectActions.delete(project.id));
       setDeleteConfirmId(null);
     } else {
       setDeleteConfirmId(project.id);
       setTimeout(() => setDeleteConfirmId(null), 3000);
     }
+  };
+
+  const handleCreateNew = () => {
+    dispatch(uiActions.openDialog({ type: 'create_project', open: true }));
   };
 
   return (
@@ -64,7 +93,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
             管理你的小说创作项目
           </p>
         </div>
-        <Button icon={<Plus size={18} />} onClick={onCreateNew}>
+        <Button icon={<Plus size={18} />} onClick={handleCreateNew}>
           新建项目
         </Button>
       </div>
@@ -83,7 +112,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
             <p className="text-sm text-slate-500 mb-6 max-w-sm">
               创建你的第一个小说项目，开始AI辅助的写作之旅
             </p>
-            <Button icon={<Plus size={18} />} onClick={onCreateNew}>
+            <Button icon={<Plus size={18} />} onClick={handleCreateNew}>
               新建项目
             </Button>
           </div>
@@ -98,7 +127,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
                 <Card
                   key={project.id}
                   hoverable
-                  onClick={() => onOpen?.(project)}
+                  onClick={() => handleOpen(project)}
                 >
                   <CardContent className="p-5">
                     {/* 项目名和状态 */}
@@ -154,7 +183,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onOpen?.(project);
+                            handleOpen(project);
                           }}
                         >
                           打开

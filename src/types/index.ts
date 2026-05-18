@@ -463,7 +463,8 @@ export type DialogType =
   | 'style_editor'
   | 'export'
   | 'import'
-  | 'about';
+  | 'about'
+  | 'create_project';
 
 /** 对话框状态 */
 export interface DialogState {

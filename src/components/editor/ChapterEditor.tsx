@@ -18,16 +18,13 @@ import {
   Check,
 } from 'lucide-react';
 import Button from '../common/Button';
+import { useAppState, useAppDispatch, editorActions, projectActions } from '../../store';
+import { useToast } from '../common/Toast';
+import { AIPipeline, type StreamCallback } from '../../services/aiPipeline';
+import { llmService } from '../../services/llm';
+import type { EditorViewMode, ReviewResult } from '../../types';
 
-type ViewMode = 'edit' | 'preview' | 'compare';
 type AIAction = 'draft' | 'review' | 'deai' | 'expand' | 'condense';
-
-interface ChapterEditorProps {
-  chapterTitle?: string;
-  initialContent?: string;
-  onSave?: (content: string) => void;
-  onAIAction?: (action: AIAction, prompt: string) => void;
-}
 
 const aiActions: { key: AIAction; label: string; icon: React.ReactNode; desc: string }[] = [
   { key: 'draft', label: '生成草稿', icon: <Wand2 size={16} />, desc: '根据大纲生成章节草稿' },
@@ -56,14 +53,92 @@ function countChineseChars(text: string): number {
   return chineseChars + englishWords;
 }
 
-const ChapterEditor: React.FC<ChapterEditorProps> = ({
-  chapterTitle = '第一章 命运的齿轮',
-  initialContent = '',
-  onSave,
-  onAIAction,
-}) => {
+/** store EditorViewMode -> 组件 ViewMode 映射 */
+function mapEditorViewMode(mode: EditorViewMode): 'edit' | 'preview' | 'compare' {
+  switch (mode) {
+    case 'edit': return 'edit';
+    case 'preview': return 'preview';
+    case 'split': return 'compare';
+    default: return 'edit';
+  }
+}
+
+/** 组件 ViewMode -> store EditorViewMode 映射 */
+function toStoreViewMode(mode: 'edit' | 'preview' | 'compare'): EditorViewMode {
+  switch (mode) {
+    case 'edit': return 'edit';
+    case 'preview': return 'preview';
+    case 'compare': return 'split';
+    default: return 'edit';
+  }
+}
+
+/** 将 ReviewResult 格式化为可读文本 */
+function formatReviewResult(result: ReviewResult): string {
+  const verdictMap: Record<string, string> = {
+    pass: '通过',
+    minor_fix: '有条件通过（需要小修）',
+    rewrite_required: '不通过（需要重写）',
+    reject: '拒绝',
+  };
+
+  const lines: string[] = [];
+  lines.push(`## 审查结果\n`);
+  lines.push(`### 整体评价`);
+  lines.push(`结论：**${verdictMap[result.verdict] ?? result.verdict}**\n`);
+
+  if (result.issues.length > 0) {
+    lines.push(`### 发现的问题`);
+    result.issues.forEach((issue, idx) => {
+      const severityLabel: Record<string, string> = {
+        error: '严重',
+        warning: '警告',
+        info: '提示',
+      };
+      lines.push(`${idx + 1}. **[${severityLabel[issue.severity] ?? issue.severity}]** ${issue.content}`);
+    });
+    lines.push('');
+  }
+
+  if (result.canonConflicts.length > 0) {
+    lines.push(`### Canon 冲突`);
+    result.canonConflicts.forEach((conflict, idx) => {
+      lines.push(`${idx + 1}. ${conflict}`);
+    });
+    lines.push('');
+  }
+
+  if (result.suggestions.length > 0) {
+    lines.push(`### 建议修改`);
+    result.suggestions.forEach((suggestion, idx) => {
+      lines.push(`${idx + 1}. ${suggestion}`);
+    });
+    lines.push('');
+  }
+
+  if (result.upgradeCheck) {
+    lines.push(`### 升级检查\n${result.upgradeCheck}`);
+  }
+
+  return lines.join('\n');
+}
+
+const pipeline = new AIPipeline();
+
+const ChapterEditor: React.FC = () => {
+  const state = useAppState();
+  const dispatch = useAppDispatch();
+  const { addToast } = useToast();
+
+  const currentChapter = state.editor.currentChapter;
+  const editorContent = state.editor.editorContent;
+  const storeViewMode = state.editor.viewMode;
+
+  const chapterTitle = currentChapter?.title ?? '未选择章节';
+  const initialContent = editorContent;
+
   const [content, setContent] = useState(initialContent);
-  const [viewMode, setViewMode] = useState<ViewMode>('edit');
+  const [viewMode, setViewMode] = useState<'edit' | 'preview' | 'compare'>(mapEditorViewMode(storeViewMode));
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
   const [selectedAction, setSelectedAction] = useState<AIAction | null>(null);
   const [promptText, setPromptText] = useState('');
@@ -73,6 +148,16 @@ const ChapterEditor: React.FC<ChapterEditorProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const wordCount = countChineseChars(content);
+
+  // 同步 store 的 editorContent 到本地 content
+  useEffect(() => {
+    setContent(editorContent);
+  }, [editorContent]);
+
+  // 同步 store 的 viewMode 到本地 viewMode
+  useEffect(() => {
+    setViewMode(mapEditorViewMode(storeViewMode));
+  }, [storeViewMode]);
 
   // 自动保存模拟
   useEffect(() => {
@@ -84,8 +169,25 @@ const ChapterEditor: React.FC<ChapterEditorProps> = ({
     }
   }, [content]);
 
+  const handleContentChange = (newContent: string) => {
+    setContent(newContent);
+    dispatch(editorActions.setContent(newContent));
+  };
+
+  const handleViewModeChange = (mode: 'edit' | 'preview' | 'compare') => {
+    setViewMode(mode);
+    dispatch(editorActions.setViewMode(toStoreViewMode(mode)));
+  };
+
   const handleSave = () => {
-    onSave?.(content);
+    if (!currentChapter) return;
+    dispatch(
+      projectActions.updateChapter(currentChapter.id, {
+        draftContent: content,
+        wordCount: countChineseChars(content),
+      })
+    );
+    dispatch(editorActions.markSaved(new Date().toISOString()));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -96,12 +198,8 @@ const ChapterEditor: React.FC<ChapterEditorProps> = ({
     setAiOutput('');
   };
 
-  const handleGenerate = () => {
-    if (!selectedAction || isGenerating) return;
-    setIsGenerating(true);
-    setAiOutput('');
-
-    // 模拟流式输出
+  /** 模拟模式：使用 sampleTexts + setInterval 模拟流式输出（降级方案） */
+  const simulateGenerate = () => {
     const sampleTexts: Record<AIAction, string> = {
       draft: `夜色如墨，月光透过云层的缝隙洒落在古老的石板路上。\n\n林远站在巷口，目光深邃地望着远处的灯火。他的手指不自觉地摩挲着口袋里那枚冰凉的铜钥匙——这是父亲临终前交给他的唯一遗物。\n\n"你终有一天会找到那扇门。"父亲的声音仿佛还在耳边回响。\n\n他深吸一口气，迈步走进了夜色之中。身后的影子被路灯拉得很长，像是一条通往未知世界的道路。\n\n巷子深处传来若有若无的钟声，那声音不像是来自任何一座教堂，更像是来自地底深处——来自那扇传说中的门。`,
       review: `## 审查结果\n\n### 整体评价\n章节整体流畅，情节推进合理。\n\n### 发现的问题\n1. **第2段**：人物心理描写可以更深入\n2. **第4段**："像是一条通往未知世界的道路" 比喻略显陈旧\n3. **伏笔检查**：铜钥匙的伏笔已正确埋设\n\n### 建议修改\n- 增加环境感官描写（声音、气味）\n- 强化主角内心的矛盾感`,
@@ -110,7 +208,7 @@ const ChapterEditor: React.FC<ChapterEditorProps> = ({
       condense: `（缩写后的内容将在这里显示...）\n\n夜色中，林远站在巷口，手握父亲遗留给他的铜钥匙。回忆起父亲临终前的话——"你终有一天会找到那扇门"——他深吸一口气，走进了夜色。巷子深处传来神秘的钟声，仿佛来自地底。`,
     };
 
-    const fullText = sampleTexts[selectedAction];
+    const fullText = sampleTexts[selectedAction!];
     let index = 0;
 
     const streamInterval = setInterval(() => {
@@ -122,8 +220,91 @@ const ChapterEditor: React.FC<ChapterEditorProps> = ({
         setIsGenerating(false);
       }
     }, 30);
+  };
 
-    onAIAction?.(selectedAction, promptText);
+  const handleGenerate = async () => {
+    if (!selectedAction || isGenerating) return;
+    setIsGenerating(true);
+    setAiOutput('');
+
+    try {
+      const hasLLM = state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0;
+
+      if (hasLLM && currentChapter) {
+        // 真实 LLM 调用
+        const onStream: StreamCallback = (token: string) => {
+          setAiOutput((prev) => prev + token);
+        };
+
+        switch (selectedAction) {
+          case 'draft': {
+            // 找到前一章
+            const chapters = state.project.chapters;
+            const previousChapter = currentChapter.chapterNumber > 1
+              ? chapters.find((c) => c.chapterNumber === currentChapter.chapterNumber - 1) ?? null
+              : null;
+
+            await pipeline.generateChapterDraft(
+              currentChapter,
+              {
+                project: state.project.currentProject!,
+                characters: state.project.characters,
+                globalSummary: state.project.globalSummary,
+                previousChapter,
+              },
+              onStream
+            );
+            break;
+          }
+          case 'review': {
+            const chapters = state.project.chapters;
+            const previousChapter = currentChapter.chapterNumber > 1
+              ? chapters.find((c) => c.chapterNumber === currentChapter.chapterNumber - 1) ?? null
+              : null;
+
+            const result = await pipeline.reviewChapter(
+              currentChapter,
+              {
+                project: state.project.currentProject!,
+                characters: state.project.characters,
+                globalSummary: state.project.globalSummary,
+                previousChapter,
+                canonLog: state.project.currentProject?.canonLog ?? [],
+              }
+            );
+            const reviewText = formatReviewResult(result);
+            setAiOutput(reviewText);
+            dispatch(editorActions.setReviewResult(result));
+            break;
+          }
+          case 'deai':
+          case 'expand':
+          case 'condense': {
+            // 这些操作使用自定义 prompt + 流式输出
+            const messages = [
+              { role: 'system' as const, content: '你是一个专业的小说编辑助手。' },
+              { role: 'user' as const, content: `${promptText}\n\n以下是需要处理的文本：\n\n${content}` },
+            ];
+            await llmService.chatStream(
+              messages,
+              { onToken: onStream },
+              undefined,
+              'draft'
+            );
+            break;
+          }
+        }
+      } else {
+        // 无 LLM 配置时使用模拟模式
+        simulateGenerate();
+      }
+    } catch (error) {
+      addToast('error', `AI 调用失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      // 降级为模拟模式
+      simulateGenerate();
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleCopyOutput = () => {
@@ -131,7 +312,9 @@ const ChapterEditor: React.FC<ChapterEditorProps> = ({
   };
 
   const handleInsertOutput = () => {
-    setContent((prev) => prev + '\n\n' + aiOutput);
+    const newContent = content + '\n\n' + aiOutput;
+    setContent(newContent);
+    dispatch(editorActions.setContent(newContent));
   };
 
   return (
@@ -152,7 +335,7 @@ const ChapterEditor: React.FC<ChapterEditorProps> = ({
           {/* 视图切换 */}
           <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
             <button
-              onClick={() => setViewMode('edit')}
+              onClick={() => handleViewModeChange('edit')}
               className={`
                 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors
                 ${viewMode === 'edit' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}
@@ -162,7 +345,7 @@ const ChapterEditor: React.FC<ChapterEditorProps> = ({
               编辑
             </button>
             <button
-              onClick={() => setViewMode('preview')}
+              onClick={() => handleViewModeChange('preview')}
               className={`
                 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors
                 ${viewMode === 'preview' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}
@@ -172,7 +355,7 @@ const ChapterEditor: React.FC<ChapterEditorProps> = ({
               预览
             </button>
             <button
-              onClick={() => setViewMode('compare')}
+              onClick={() => handleViewModeChange('compare')}
               className={`
                 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors
                 ${viewMode === 'compare' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}
@@ -216,7 +399,7 @@ const ChapterEditor: React.FC<ChapterEditorProps> = ({
             <textarea
               ref={textareaRef}
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => handleContentChange(e.target.value)}
               placeholder="开始写作..."
               className="
                 flex-1 w-full px-8 py-6 text-base leading-[1.8] text-slate-800

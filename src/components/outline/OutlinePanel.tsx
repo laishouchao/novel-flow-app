@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Plus,
   Wand2,
@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import Button from '../common/Button';
 import { StructureBadge } from '../common/Badge';
+import { useAppState, useAppDispatch, projectActions, editorActions, uiActions } from '../../store';
+import type { Chapter as StoreChapter, ChapterStructureTag, ChapterStatus as StoreChapterStatus } from '../../types';
 
 /** 结构标记类型 */
 type StructureType = 'setup' | 'build' | 'climax' | 'fallout';
@@ -39,11 +41,29 @@ interface Volume {
   chapters: Chapter[];
 }
 
-interface OutlinePanelProps {
-  volumes?: Volume[];
-  onGenerateVolume?: (volumeId: string) => void;
-  onGenerateAll?: () => void;
-  onChapterClick?: (volumeId: string, chapterId: string) => void;
+/** store ChapterStatus -> 组件 ChapterStatus 映射 */
+function mapChapterStatus(status: StoreChapterStatus): ChapterStatus {
+  switch (status) {
+    case 'pending': return 'planned';
+    case 'drafting': return 'drafted';
+    case 'reviewing': return 'reviewed';
+    case 'minor_fix': return 'revised';
+    case 'rewrite': return 'drafted';
+    case 'done': return 'done';
+    case 'rejected': return 'drafted';
+    default: return 'planned';
+  }
+}
+
+/** store ChapterStructureTag -> 组件 StructureType 映射 */
+function mapStructureTag(tag: ChapterStructureTag): StructureType {
+  switch (tag) {
+    case 'setup': return 'setup';
+    case 'build': return 'build';
+    case 'climax': return 'climax';
+    case 'fallout': return 'fallout';
+    default: return 'setup';
+  }
 }
 
 const statusIcons: Record<ChapterStatus, React.ReactNode> = {
@@ -62,94 +82,45 @@ const statusLabels: Record<ChapterStatus, string> = {
   done: '完成',
 };
 
-const sampleVolumes: Volume[] = [
-  {
-    id: 'v1',
-    name: '第一卷：起源',
-    chapters: [
-      {
-        id: 'c1-1',
-        index: 1,
-        title: '命运的齿轮',
-        structure: 'setup',
-        suspenseDensity: 2,
-        status: 'done',
-        taskDescription: '引入主角，建立世界观基础',
-        foreshadowing: '埋下神秘钥匙的伏笔',
-        cognitiveSubversion: 3,
-      },
-      {
-        id: 'c1-2',
-        index: 2,
-        title: '暗流涌动',
-        structure: 'build',
-        suspenseDensity: 3,
-        status: 'drafted',
-        taskDescription: '主角发现异常事件，引出主线冲突',
-        foreshadowing: '暗示导师的真实身份',
-        cognitiveSubversion: 5,
-      },
-      {
-        id: 'c1-3',
-        index: 3,
-        title: '真相碎片',
-        structure: 'climax',
-        suspenseDensity: 5,
-        status: 'planned',
-        taskDescription: '第一卷高潮，揭示部分真相',
-        foreshadowing: '为第二卷的转折做铺垫',
-        cognitiveSubversion: 8,
-      },
-      {
-        id: 'c1-4',
-        index: 4,
-        title: '新的开始',
-        structure: 'fallout',
-        suspenseDensity: 2,
-        status: 'planned',
-        taskDescription: '高潮后的平静，为下一卷做过渡',
-        cognitiveSubversion: 2,
-      },
-    ],
-  },
-  {
-    id: 'v2',
-    name: '第二卷：觉醒',
-    chapters: [
-      {
-        id: 'c2-1',
-        index: 1,
-        title: '觉醒之力',
-        structure: 'setup',
-        suspenseDensity: 3,
-        status: 'planned',
-        taskDescription: '引入新能力体系，主角开始修炼',
-        cognitiveSubversion: 4,
-      },
-      {
-        id: 'c2-2',
-        index: 2,
-        title: '试炼之路',
-        structure: 'build',
-        suspenseDensity: 4,
-        status: 'planned',
-        taskDescription: '主角经历试炼，遇到重要配角',
-        cognitiveSubversion: 6,
-      },
-    ],
-  },
-];
+const OutlinePanel: React.FC = () => {
+  const state = useAppState();
+  const dispatch = useAppDispatch();
 
-const OutlinePanel: React.FC<OutlinePanelProps> = ({
-  volumes = sampleVolumes,
-  onGenerateVolume,
-  onGenerateAll,
-  onChapterClick,
-}) => {
+  const storeVolumes = state.project.volumes;
+  const storeChapters = state.project.chapters;
+
+  // 将 store 数据转换为组件内部格式
+  const volumes = useMemo<Volume[]>(() => {
+    return storeVolumes
+      .sort((a, b) => a.volumeNumber - b.volumeNumber)
+      .map((vol) => ({
+        id: vol.id,
+        name: vol.title,
+        chapters: storeChapters
+          .filter((ch) => ch.volumeNumber === vol.volumeNumber)
+          .sort((a, b) => a.chapterNumber - b.chapterNumber)
+          .map((ch) => ({
+            id: ch.id,
+            index: ch.chapterNumber,
+            title: ch.title,
+            structure: mapStructureTag(ch.structureTag),
+            suspenseDensity: ch.suspenseLevel,
+            status: mapChapterStatus(ch.status),
+            taskDescription: ch.task,
+            foreshadowing: ch.foreshadowing,
+            cognitiveSubversion: ch.plotTwistLevel * 2, // store 1-5 -> 组件 0-10
+          })),
+      }));
+  }, [storeVolumes, storeChapters]);
+
   const [activeVolumeId, setActiveVolumeId] = useState(volumes[0]?.id || '');
   const [expandedChapterId, setExpandedChapterId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [generating, setGenerating] = useState<string | null>(null);
+
+  // 编辑模式下的临时编辑状态
+  const [editTask, setEditTask] = useState('');
+  const [editForeshadowing, setEditForeshadowing] = useState('');
 
   const activeVolume = volumes.find((v) => v.id === activeVolumeId);
 
@@ -157,7 +128,7 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({
     setGenerating(volumeId);
     setTimeout(() => {
       setGenerating(null);
-      onGenerateVolume?.(volumeId);
+      // 保留模拟行为，AI 服务接入是另一个任务
     }, 2000);
   };
 
@@ -165,13 +136,67 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({
     setGenerating('all');
     setTimeout(() => {
       setGenerating(null);
-      onGenerateAll?.();
+      // 保留模拟行为，AI 服务接入是另一个任务
     }, 3000);
   };
 
   const toggleChapter = (chapterId: string) => {
     setExpandedChapterId((prev) => (prev === chapterId ? null : chapterId));
-    onChapterClick?.(activeVolumeId, chapterId);
+    // 点击章节时，dispatch 到编辑器
+    const chapter = storeChapters.find((ch) => ch.id === chapterId);
+    if (chapter) {
+      dispatch(editorActions.setChapter(chapter));
+      dispatch(uiActions.setView('editor'));
+    }
+  };
+
+  const handleSaveEdit = (chapterId: string) => {
+    dispatch(
+      projectActions.updateChapter(chapterId, {
+        title: editTask, // 这里用 editTask 暂存，实际应该分别保存
+        task: editTask,
+        foreshadowing: editForeshadowing,
+      })
+    );
+    setExpandedChapterId(null);
+  };
+
+  const handleCancelEdit = () => {
+    setExpandedChapterId(null);
+  };
+
+  const handleAddChapter = () => {
+    const activeVol = storeVolumes.find((v) => v.id === activeVolumeId);
+    if (!activeVol) return;
+    const existingChapters = storeChapters.filter(
+      (ch) => ch.volumeNumber === activeVol.volumeNumber
+    );
+    const nextNumber = existingChapters.length + 1;
+    const newChapter: StoreChapter = {
+      id: `ch-${activeVolumeId}-${Date.now()}`,
+      projectId: state.project.currentProject?.id ?? '',
+      volumeId: activeVolumeId,
+      chapterNumber: nextNumber,
+      volumeNumber: activeVol.volumeNumber,
+      title: `新章节 ${nextNumber}`,
+      task: '',
+      structureTag: 'setup',
+      status: 'pending',
+      reviewRound: 0,
+      canonChanged: false,
+      suspenseLevel: 2,
+      foreshadowing: '',
+      plotTwistLevel: 2,
+      draftContent: '',
+      finalContent: '',
+      summary: '',
+      reviewNotes: '',
+      finalSummary: '',
+      wordCount: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    dispatch(projectActions.addChapter(newChapter));
   };
 
   const renderStars = (count: number) => {
@@ -318,6 +343,7 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({
                         {editMode ? (
                           <textarea
                             defaultValue={chapter.taskDescription}
+                            onChange={(e) => setEditTask(e.target.value)}
                             rows={2}
                             className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm
                                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
@@ -338,6 +364,7 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({
                         {editMode ? (
                           <textarea
                             defaultValue={chapter.foreshadowing}
+                            onChange={(e) => setEditForeshadowing(e.target.value)}
                             rows={2}
                             className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm
                                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
@@ -375,10 +402,10 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({
                       {/* 编辑模式下的操作按钮 */}
                       {editMode && (
                         <div className="flex gap-2 pt-2">
-                          <Button variant="primary" size="sm">
+                          <Button variant="primary" size="sm" onClick={() => handleSaveEdit(chapter.id)}>
                             保存修改
                           </Button>
-                          <Button variant="ghost" size="sm">
+                          <Button variant="ghost" size="sm" onClick={handleCancelEdit}>
                             取消
                           </Button>
                         </div>
@@ -392,7 +419,10 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({
             {/* 添加章节按钮 */}
             {editMode && (
               <div className="px-5 py-3">
-                <button className="w-full py-3 rounded-lg border-2 border-dashed border-slate-200 text-sm text-slate-400 hover:text-blue-600 hover:border-blue-300 transition-colors flex items-center justify-center gap-2">
+                <button
+                  onClick={handleAddChapter}
+                  className="w-full py-3 rounded-lg border-2 border-dashed border-slate-200 text-sm text-slate-400 hover:text-blue-600 hover:border-blue-300 transition-colors flex items-center justify-center gap-2"
+                >
                   <Plus size={16} />
                   添加新章节
                 </button>

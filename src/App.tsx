@@ -1,17 +1,45 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AppProvider, useAppState } from "./store";
-import Sidebar from "./components/layout/Sidebar";
-import StatusBar from "./components/layout/StatusBar";
-import ProjectList from "./components/project/ProjectList";
-import CreateProjectDialog from "./components/project/CreateProjectDialog";
-import BrainstormPanel from "./components/brainstorm/BrainstormPanel";
-import OutlinePanel from "./components/outline/OutlinePanel";
-import ChapterEditor from "./components/editor/ChapterEditor";
-import ReviewPanel from "./components/review/ReviewPanel";
-import SettingsPanel from "./components/settings/SettingsPanel";
-import Toast from "./components/common/Toast";
+import { useCallback } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { AppProvider, useAppState, useAppDispatch, uiActions, selectWritingProgress } from './store';
+import type { ProjectStage } from './types';
+import Sidebar from './components/layout/Sidebar';
+import StatusBar from './components/layout/StatusBar';
+import ProjectList from './components/project/ProjectList';
+import CreateProjectDialog from './components/project/CreateProjectDialog';
+import BrainstormPanel from './components/brainstorm/BrainstormPanel';
+import OutlinePanel from './components/outline/OutlinePanel';
+import ChapterEditor from './components/editor/ChapterEditor';
+import ReviewPanel from './components/review/ReviewPanel';
+import SettingsPanel from './components/settings/SettingsPanel';
+import { ToastProvider } from './components/common/Toast';
 
-/* ====== 写作工作台 - 根据项目状态显示不同面板 ====== */
+// ============================================================================
+// 辅助函数
+// ============================================================================
+
+/** 根据项目阶段计算当前步骤 (1-5) */
+function getStepFromStage(stage?: ProjectStage): number {
+  switch (stage) {
+    case 'brainstorm': return 1;
+    case 'outline': return 2;
+    case 'draft': return 3;
+    case 'review': return 4;
+    case 'update': return 5;
+    default: return 1;
+  }
+}
+
+/** 将路由路径映射为 Sidebar 导航项 */
+function navFromPath(pathname: string): 'writing' | 'projects' | 'settings' {
+  if (pathname.startsWith('/project')) return 'projects';
+  if (pathname.startsWith('/settings')) return 'settings';
+  return 'writing';
+}
+
+// ============================================================================
+// 写作工作台 - 根据项目状态显示不同面板
+// ============================================================================
+
 function WritingDesk() {
   const state = useAppState();
 
@@ -27,30 +55,30 @@ function WritingDesk() {
   // 根据项目状态自动路由到对应面板
   const renderMainPanel = () => {
     // 用户手动切换视图时优先显示
-    if (currentView === "editor") return <OutlinePanel />;
-    if (currentView === "review") return <ReviewPanel />;
-    if (currentView === "brainstorm") return <BrainstormPanel />;
+    if (currentView === 'editor') return <ChapterEditor />;
+    if (currentView === 'review') return <ReviewPanel />;
+    if (currentView === 'brainstorm') return <BrainstormPanel />;
 
     // 根据状态机自动路由
-    if (projectStatus === "idea" && projectStage === "brainstorm") {
+    if (projectStatus === 'idea' && projectStage === 'brainstorm') {
       return <BrainstormPanel />;
     }
-    if (projectStatus === "idea" && (projectStage === "outline" || !projectStage)) {
+    if (projectStatus === 'idea' && (projectStage === 'outline' || !projectStage)) {
       return <OutlinePanel />;
     }
-    if (projectStatus === "planned") {
+    if (projectStatus === 'planned') {
       return <OutlinePanel />;
     }
-    if (projectStatus === "drafting") {
+    if (projectStatus === 'drafting') {
       return <ChapterEditor />;
     }
-    if (projectStatus === "reviewing") {
+    if (projectStatus === 'reviewing') {
       return <ReviewPanel />;
     }
-    if (projectStatus === "done") {
+    if (projectStatus === 'done') {
       return <ChapterEditor />;
     }
-    if (projectStatus === "blocked") {
+    if (projectStatus === 'blocked') {
       return <OutlinePanel />;
     }
 
@@ -61,12 +89,25 @@ function WritingDesk() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-hidden">{renderMainPanel()}</div>
-      <StatusBar />
+      <StatusBar
+        projectName={state.project.currentProject.name}
+        volumeIndex={state.project.currentProject.currentVolume}
+        chapterIndex={state.project.currentProject.currentChapter}
+        projectStatus={state.project.currentProject.status}
+        chapterWordCount={state.editor.currentChapter?.wordCount}
+        totalWordCount={state.project.chapters.reduce((sum, c) => sum + c.wordCount, 0)}
+        targetWordCount={state.project.currentProject.targetWords}
+        aiModelStatus={state.ai.activeLLM ? 'connected' : 'disconnected'}
+        aiModelName={state.ai.activeLLM?.model}
+      />
     </div>
   );
 }
 
-/* ====== 项目管理页面 ====== */
+// ============================================================================
+// 项目管理页面
+// ============================================================================
+
 function ProjectManager() {
   return (
     <div className="flex flex-col h-full">
@@ -77,7 +118,10 @@ function ProjectManager() {
   );
 }
 
-/* ====== 设置页面 ====== */
+// ============================================================================
+// 设置页面
+// ============================================================================
+
 function SettingsPage() {
   return (
     <div className="flex flex-col h-full">
@@ -88,11 +132,48 @@ function SettingsPage() {
   );
 }
 
-/* ====== 主应用布局 ====== */
+// ============================================================================
+// 主应用布局
+// ============================================================================
+
 function AppLayout() {
+  const state = useAppState();
+  const dispatch = useAppDispatch();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const currentProject = state.project.currentProject;
+  const progress = selectWritingProgress(state);
+
+  // Sidebar 导航
+  const currentNav = navFromPath(location.pathname);
+
+  const handleNavChange = useCallback((nav: 'writing' | 'projects' | 'settings') => {
+    switch (nav) {
+      case 'writing': navigate('/'); break;
+      case 'projects': navigate('/project'); break;
+      case 'settings': navigate('/settings'); break;
+    }
+  }, [navigate]);
+
+  const handleToggleCollapse = useCallback(() => {
+    dispatch(uiActions.toggleSidebar());
+  }, [dispatch]);
+
   return (
     <div className="flex h-screen bg-gray-50">
-      <Sidebar />
+      <Sidebar
+        currentNav={currentNav}
+        onNavChange={handleNavChange}
+        collapsed={!state.ui.sidebarOpen}
+        onToggleCollapse={handleToggleCollapse}
+        projectInfo={currentProject ? {
+          name: currentProject.name,
+          status: currentProject.status,
+          progress,
+        } : undefined}
+        currentStep={currentProject ? getStepFromStage(currentProject.stage) : undefined}
+      />
       <main className="flex-1 overflow-hidden">
         <Routes>
           <Route path="/" element={<WritingDesk />} />
@@ -101,18 +182,22 @@ function AppLayout() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      <CreateProjectDialog open={false} onClose={() => {}} />
-      <Toast message="" visible={false} />
+      <CreateProjectDialog />
     </div>
   );
 }
 
-/* ====== 根组件：注入全局状态 ====== */
+// ============================================================================
+// 根组件：注入全局状态
+// ============================================================================
+
 export default function App() {
   return (
     <AppProvider>
       <BrowserRouter>
-        <AppLayout />
+        <ToastProvider>
+          <AppLayout />
+        </ToastProvider>
       </BrowserRouter>
     </AppProvider>
   );

@@ -5,7 +5,7 @@
 // 包含 ProjectState / EditorState / AIState / UIState 四大状态域
 // ============================================================================
 
-import { createContext, useContext, useReducer, type Dispatch, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useState, useEffect, type Dispatch, type ReactNode } from 'react';
 import type {
   NovelProject,
   Chapter,
@@ -759,6 +759,38 @@ function appReducer(state: AppState, action: AppAction): AppState {
 }
 
 // ============================================================================
+// localStorage 持久化
+// ============================================================================
+
+const STORAGE_KEY = 'novelflow-state';
+
+function loadState(): Partial<AppState> | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    return {
+      project: saved.project ? { ...initialProjectState, ...saved.project } : undefined,
+      ai: saved.ai ? { ...initialAIState, ...saved.ai } : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveState(state: AppState) {
+  try {
+    const toSave = {
+      project: state.project,
+      ai: state.ai,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  } catch {
+    // ignore
+  }
+}
+
+// ============================================================================
 // Context
 // ============================================================================
 
@@ -771,20 +803,24 @@ const AppDispatchContext = createContext<Dispatch<AppAction> | null>(null);
 
 interface AppProviderProps {
   children: ReactNode;
-  preloadedState?: Partial<AppState>;
 }
 
-export function AppProvider({ children, preloadedState }: AppProviderProps) {
-  const mergedState: AppState = preloadedState
+export function AppProvider({ children }: AppProviderProps) {
+  const [preloadedState] = useState<Partial<AppState> | null>(() => loadState());
+  const [state, dispatch] = useReducer(appReducer, preloadedState
     ? {
         project: { ...initialProjectState, ...preloadedState.project },
-        editor: { ...initialEditorState, ...preloadedState.editor },
+        editor: initialEditorState,
         ai: { ...initialAIState, ...preloadedState.ai },
-        ui: { ...initialUIState, ...preloadedState.ui },
+        ui: initialUIState,
       }
-    : initialState;
+    : initialState);
 
-  const [state, dispatch] = useReducer(appReducer, mergedState);
+  // Debounced save to localStorage
+  useEffect(() => {
+    const timer = setTimeout(() => saveState(state), 500);
+    return () => clearTimeout(timer);
+  }, [state]);
 
   return (
     <AppStateContext.Provider value={state}>

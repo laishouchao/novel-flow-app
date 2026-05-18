@@ -1,12 +1,9 @@
 import React, { useState } from 'react';
 import Dialog from '../common/Dialog';
 import Button from '../common/Button';
-
-interface CreateProjectDialogProps {
-  open: boolean;
-  onClose: () => void;
-  onConfirm?: (data: ProjectFormData) => void;
-}
+import { useAppState, useAppDispatch, projectActions, uiActions } from '../../store';
+import { generateId } from '../../utils/id';
+import type { NovelProject, NovelStyle, PresetStyle } from '../../types';
 
 export interface ProjectFormData {
   name: string;
@@ -34,11 +31,66 @@ const styles = [
   { value: 'custom', label: '自定义', desc: '自行定义写作风格' },
 ];
 
-const CreateProjectDialog: React.FC<CreateProjectDialogProps> = ({
-  open,
-  onClose,
-  onConfirm,
-}) => {
+/** 根据表单中的 style 值构建 NovelStyle 对象 */
+function buildNovelStyle(styleValue: string, customStyle: string): NovelStyle {
+  if (styleValue === 'custom') {
+    return {
+      preset: 'custom' as PresetStyle,
+      name: customStyle || '自定义风格',
+      description: customStyle || '用户自定义写作风格',
+      sentenceRules: [],
+      descriptionRules: [],
+      dialogueRules: [],
+      emotionRules: [],
+      forbiddenPatterns: [],
+      forbiddenWords: [],
+    };
+  }
+
+  // 预设风格映射
+  const presetMap: Record<string, { preset: PresetStyle; name: string; description: string }> = {
+    cold_narration: {
+      preset: 'cold_realism',
+      name: '冷白描',
+      description: '克制、冷静、白描式叙事',
+    },
+    system_power: {
+      preset: 'system_power',
+      name: '系统爽文',
+      description: '系统流、升级感、爽点密集',
+    },
+    weird_suspense: {
+      preset: 'bizarre_suspense',
+      name: '怪诞悬疑',
+      description: '诡异氛围、层层悬念',
+    },
+  };
+
+  const mapped = presetMap[styleValue] || {
+    preset: 'cold_realism' as PresetStyle,
+    name: '冷白描',
+    description: '克制、冷静、白描式叙事',
+  };
+
+  return {
+    preset: mapped.preset,
+    name: mapped.name,
+    description: mapped.description,
+    sentenceRules: [],
+    descriptionRules: [],
+    dialogueRules: [],
+    emotionRules: [],
+    forbiddenPatterns: [],
+    forbiddenWords: [],
+  };
+}
+
+const CreateProjectDialog: React.FC = () => {
+  const state = useAppState();
+  const dispatch = useAppDispatch();
+
+  const isOpen = state.ui.dialog.type === 'create_project' && state.ui.dialog.open;
+
   const [formData, setFormData] = useState<ProjectFormData>({
     name: '',
     author: '',
@@ -57,27 +109,72 @@ const CreateProjectDialog: React.FC<CreateProjectDialogProps> = ({
     setFormData((prev) => ({ ...prev, [key]: value }));
   };
 
+  const handleClose = () => {
+    dispatch(uiActions.closeDialog());
+    // 重置表单
+    setFormData({
+      name: '',
+      author: '',
+      genre: 'fantasy',
+      style: 'cold_narration',
+      targetWordCount: 500000,
+      chapterWordCount: 2300,
+    });
+    setCustomStyle('');
+  };
+
   const handleSubmit = () => {
     if (!formData.name.trim()) return;
-    const data = { ...formData };
-    if (data.style === 'custom' && customStyle.trim()) {
-      data.style = customStyle.trim();
-    }
-    onConfirm?.(data);
-    onClose();
+
+    const styleValue = formData.style === 'custom' && customStyle.trim()
+      ? customStyle.trim()
+      : formData.style;
+
+    const now = new Date().toISOString();
+    const project: NovelProject = {
+      id: generateId('proj'),
+      name: formData.name.trim(),
+      author: formData.author.trim(),
+      genre: formData.genre,
+      theme: '',
+      style: buildNovelStyle(styleValue, customStyle.trim()),
+      targetWords: formData.targetWordCount,
+      chapterTargetWords: formData.chapterWordCount,
+      status: 'idea',
+      stage: 'brainstorm',
+      currentVolume: 0,
+      currentChapter: 0,
+      createdAt: now,
+      updatedAt: now,
+      canonLog: [],
+    };
+
+    dispatch(projectActions.add(project));
+    dispatch(uiActions.closeDialog());
+
+    // 重置表单
+    setFormData({
+      name: '',
+      author: '',
+      genre: 'fantasy',
+      style: 'cold_narration',
+      targetWordCount: 500000,
+      chapterWordCount: 2300,
+    });
+    setCustomStyle('');
   };
 
   const isValid = formData.name.trim().length > 0;
 
   return (
     <Dialog
-      open={open}
-      onClose={onClose}
+      open={isOpen}
+      onClose={handleClose}
       title="新建小说项目"
       size="md"
       footer={
         <>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={handleClose}>
             取消
           </Button>
           <Button onClick={handleSubmit} disabled={!isValid}>

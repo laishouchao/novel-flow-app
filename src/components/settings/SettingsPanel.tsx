@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Settings,
   Key,
@@ -17,10 +17,27 @@ import {
 import Button from '../common/Button';
 import Card, { CardContent } from '../common/Card';
 import Badge from '../common/Badge';
+import { useAppState, useAppDispatch, aiActions } from '../../store';
+import { useToast } from '../common/Toast';
+import { llmService } from '../../services/llm';
+import type { LLMServiceConfig } from '../../services/llm';
+import type {
+  LLMConfig as StoreLLMConfig,
+  TaskModelAssignment as StoreTaskAssignment,
+  PresetStyle,
+  NovelStyle,
+  AppConfig,
+  LLMInterfaceFormat,
+} from '../../types';
+
+// ============================================================================
+// 组件内部类型（与 store 类型做映射）
+// ============================================================================
 
 type SettingsTab = 'api' | 'style' | 'editor';
 
-interface LLMConfig {
+/** 组件内部使用的 LLM 配置（provider 字段对应 store 的 interfaceFormat） */
+interface LocalLLMConfig {
   id: string;
   name: string;
   provider: string;
@@ -31,14 +48,8 @@ interface LLMConfig {
   maxTokens: number;
 }
 
-interface TaskModelAssignment {
-  task: string;
-  label: string;
-  configId: string;
-}
-
 interface StylePreset {
-  id: string;
+  id: PresetStyle;
   name: string;
   description: string;
   features: string[];
@@ -51,46 +62,30 @@ interface EditorPreferences {
   theme: 'light' | 'dark';
 }
 
-interface SettingsPanelProps {
-  onSave?: (settings: any) => void;
-}
+// ============================================================================
+// 常量
+// ============================================================================
 
-const sampleLLMConfigs: LLMConfig[] = [
-  {
-    id: 'cfg-1',
-    name: 'GPT-4o 主力',
-    provider: 'openai',
-    apiKey: 'sk-****',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4o',
-    temperature: 0.7,
-    maxTokens: 4096,
+const defaultAppConfig: AppConfig = {
+  llmConfigs: [],
+  taskAssignment: {
+    brainstorm: '',
+    outline: '',
+    draft: '',
+    review: '',
+    finalization: '',
+    summary: '',
   },
-  {
-    id: 'cfg-2',
-    name: 'Claude 精修',
-    provider: 'anthropic',
-    apiKey: 'sk-ant-****',
-    baseUrl: 'https://api.anthropic.com',
-    model: 'claude-3-5-sonnet-20241022',
-    temperature: 0.5,
-    maxTokens: 8192,
-  },
-];
-
-const sampleTaskAssignments: TaskModelAssignment[] = [
-  { task: 'brainstorm', label: '灵感收束', configId: 'cfg-1' },
-  { task: 'outline', label: '大纲生成', configId: 'cfg-1' },
-  { task: 'draft', label: '草稿生成', configId: 'cfg-1' },
-  { task: 'review', label: '章节审查', configId: 'cfg-2' },
-  { task: 'finalize', label: '定稿润色', configId: 'cfg-2' },
-  { task: 'summary', label: '摘要生成', configId: 'cfg-1' },
-];
+  defaultStyle: 'cold_realism',
+  customStyles: [],
+  proxySetting: { enabled: false },
+  recentProjects: [],
+};
 
 const stylePresets: StylePreset[] = [
   {
-    id: 'cold_narration',
-    name: '冷白描',
+    id: 'cold_realism',
+    name: '冷峻写实',
     description: '克制、冷静、白描式叙事，以简洁的语言勾勒场景和人物',
     features: ['简洁叙事', '环境白描', '克制情感', '留白艺术'],
   },
@@ -101,18 +96,69 @@ const stylePresets: StylePreset[] = [
     features: ['系统面板', '等级升级', '爽点密集', '节奏明快'],
   },
   {
-    id: 'weird_suspense',
-    name: '怪诞悬疑',
+    id: 'bizarre_suspense',
+    name: '诡奇悬疑',
     description: '诡异氛围、层层悬念，以细节和暗示构建不安感',
     features: ['诡异氛围', '层层悬念', '细节暗示', '心理恐怖'],
   },
 ];
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
+const taskLabels: { key: keyof StoreTaskAssignment; label: string }[] = [
+  { key: 'brainstorm', label: '灵感收束' },
+  { key: 'outline', label: '大纲生成' },
+  { key: 'draft', label: '草稿生成' },
+  { key: 'review', label: '章节审查' },
+  { key: 'finalization', label: '定稿润色' },
+  { key: 'summary', label: '摘要生成' },
+];
+
+// ============================================================================
+// 类型映射工具函数
+// ============================================================================
+
+/** Store LLMConfig -> 组件内部 LocalLLMConfig */
+function storeToLocal(storeConfig: StoreLLMConfig): LocalLLMConfig {
+  return {
+    id: storeConfig.id,
+    name: storeConfig.name,
+    provider: storeConfig.interfaceFormat,
+    apiKey: storeConfig.apiKey,
+    baseUrl: storeConfig.baseUrl,
+    model: storeConfig.model,
+    temperature: storeConfig.temperature,
+    maxTokens: storeConfig.maxTokens,
+  };
+}
+
+/** 组件内部 LocalLLMConfig -> Store LLMConfig */
+function localToStore(localConfig: LocalLLMConfig): StoreLLMConfig {
+  return {
+    id: localConfig.id,
+    name: localConfig.name,
+    interfaceFormat: localConfig.provider as LLMInterfaceFormat,
+    apiKey: localConfig.apiKey,
+    baseUrl: localConfig.baseUrl,
+    model: localConfig.model,
+    maxTokens: localConfig.maxTokens,
+    temperature: localConfig.temperature,
+    timeout: 60000,
+  };
+}
+
+// ============================================================================
+// 组件
+// ============================================================================
+
+const SettingsPanel: React.FC = () => {
+  const state = useAppState();
+  const dispatch = useAppDispatch();
+  const { addToast } = useToast();
+
+  const config: AppConfig = state.ai.config ?? defaultAppConfig;
+
+  // ---- 本地状态 ----
   const [activeTab, setActiveTab] = useState<SettingsTab>('api');
-  const [llmConfigs, setLlmConfigs] = useState<LLMConfig[]>(sampleLLMConfigs);
-  const [taskAssignments, setTaskAssignments] = useState<TaskModelAssignment[]>(sampleTaskAssignments);
-  const [editingConfig, setEditingConfig] = useState<LLMConfig | null>(null);
+  const [editingConfig, setEditingConfig] = useState<LocalLLMConfig | null>(null);
   const [isNewConfig, setIsNewConfig] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, 'success' | 'fail'>>({});
@@ -124,16 +170,20 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
     theme: 'light',
   });
 
-  const [customStyle, setCustomStyle] = useState('');
+  const [customStyleName, setCustomStyleName] = useState('');
+  const [customStyleDesc, setCustomStyleDesc] = useState('');
 
-  const tabs: { key: SettingsTab; label: string; icon: React.ReactNode }[] = [
-    { key: 'api', label: 'API 配置', icon: <Key size={16} /> },
-    { key: 'style', label: '风格管理', icon: <Palette size={16} /> },
-    { key: 'editor', label: '编辑器偏好', icon: <Type size={16} /> },
-  ];
+  // ---- 确保 config 存在（首次访问设置时初始化） ----
+  useEffect(() => {
+    if (!state.ai.config) {
+      dispatch(aiActions.setConfig(defaultAppConfig));
+    }
+  }, [state.ai.config, dispatch]);
 
-  const handleAddConfig = () => {
-    const newConfig: LLMConfig = {
+  // ---- LLM 配置操作 ----
+
+  const handleAddConfig = useCallback(() => {
+    const newConfig: LocalLLMConfig = {
       id: `cfg-${Date.now()}`,
       name: '新配置',
       provider: 'openai',
@@ -145,43 +195,108 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
     };
     setEditingConfig(newConfig);
     setIsNewConfig(true);
-  };
+  }, []);
 
-  const handleEditConfig = (config: LLMConfig) => {
-    setEditingConfig({ ...config });
+  const handleEditConfig = useCallback((storeConfig: StoreLLMConfig) => {
+    setEditingConfig(storeToLocal(storeConfig));
     setIsNewConfig(false);
-  };
+  }, []);
 
-  const handleDeleteConfig = (id: string) => {
-    setLlmConfigs((prev) => prev.filter((c) => c.id !== id));
-  };
+  const handleDeleteConfig = useCallback((id: string) => {
+    dispatch(aiActions.deleteLLMConfig(id));
+  }, [dispatch]);
 
-  const handleSaveConfig = () => {
+  const handleSaveConfig = useCallback(() => {
     if (!editingConfig) return;
+    const storeConfig = localToStore(editingConfig);
     if (isNewConfig) {
-      setLlmConfigs((prev) => [...prev, editingConfig]);
+      dispatch(aiActions.addLLMConfig(storeConfig));
     } else {
-      setLlmConfigs((prev) =>
-        prev.map((c) => (c.id === editingConfig.id ? editingConfig : c))
-      );
+      dispatch(aiActions.updateLLMConfig(storeConfig.id, storeConfig));
     }
     setEditingConfig(null);
     setIsNewConfig(false);
-  };
+    addToast('success', isNewConfig ? '配置已添加' : '配置已更新');
+  }, [editingConfig, isNewConfig, dispatch, addToast]);
 
-  const handleTestConnection = (id: string) => {
-    setTestingId(id);
-    setTimeout(() => {
+  const handleTestConnection = useCallback(async (storeConfig: StoreLLMConfig) => {
+    setTestingId(storeConfig.id);
+    const serviceConfig: LLMServiceConfig = {
+      baseUrl: storeConfig.baseUrl,
+      apiKey: storeConfig.apiKey,
+      model: storeConfig.model,
+      maxTokens: 20,
+      temperature: storeConfig.temperature,
+      timeout: 15000,
+    };
+    try {
+      const ok = await llmService.testConnection(serviceConfig);
+      setTestResults((prev) => ({ ...prev, [storeConfig.id]: ok ? 'success' : 'fail' }));
+      addToast(ok ? 'success' : 'error', ok ? '连接成功' : '连接失败');
+    } catch {
+      setTestResults((prev) => ({ ...prev, [storeConfig.id]: 'fail' }));
+      addToast('error', '连接失败');
+    } finally {
       setTestingId(null);
-      setTestResults((prev) => ({ ...prev, [id]: 'success' }));
-    }, 2000);
-  };
+    }
+  }, [addToast]);
 
-  const handleTaskAssignmentChange = (task: string, configId: string) => {
-    setTaskAssignments((prev) =>
-      prev.map((a) => (a.task === task ? { ...a, configId } : a))
-    );
-  };
+  // ---- 任务指派操作 ----
+
+  const handleTaskAssignmentChange = useCallback((task: keyof StoreTaskAssignment, configId: string) => {
+    const updated: StoreTaskAssignment = {
+      ...config.taskAssignment,
+      [task]: configId,
+    };
+    dispatch(aiActions.setTaskAssignment(updated));
+  }, [config.taskAssignment, dispatch]);
+
+  // ---- 风格操作 ----
+
+  const handleSelectPresetStyle = useCallback((preset: PresetStyle) => {
+    dispatch(aiActions.setDefaultStyle(preset));
+    addToast('success', '默认风格已切换');
+  }, [dispatch, addToast]);
+
+  const handleSaveCustomStyle = useCallback(() => {
+    if (!customStyleName.trim() || !customStyleDesc.trim()) {
+      addToast('warning', '请填写风格名称和描述');
+      return;
+    }
+    const style: NovelStyle = {
+      preset: 'custom',
+      name: customStyleName.trim(),
+      description: customStyleDesc.trim(),
+      sentenceRules: [],
+      descriptionRules: [],
+      dialogueRules: [],
+      emotionRules: [],
+      forbiddenPatterns: [],
+      forbiddenWords: [],
+    };
+    dispatch(aiActions.addCustomStyle(style));
+    setCustomStyleName('');
+    setCustomStyleDesc('');
+    addToast('success', '自定义风格已保存');
+  }, [customStyleName, customStyleDesc, dispatch, addToast]);
+
+  // ---- 编辑器偏好操作 ----
+
+  const handleSaveEditorPrefs = useCallback(() => {
+    addToast('success', '设置已保存');
+  }, [addToast]);
+
+  // ---- Tab 定义 ----
+
+  const tabs: { key: SettingsTab; label: string; icon: React.ReactNode }[] = [
+    { key: 'api', label: 'API 配置', icon: <Key size={16} /> },
+    { key: 'style', label: '风格管理', icon: <Palette size={16} /> },
+    { key: 'editor', label: '编辑器偏好', icon: <Type size={16} /> },
+  ];
+
+  // ============================================================================
+  // 渲染：API 配置 Tab
+  // ============================================================================
 
   const renderAPITab = () => (
     <div className="space-y-6">
@@ -196,73 +311,88 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
 
         {/* 配置卡片列表 */}
         <div className="space-y-3">
-          {llmConfigs.map((config) => (
-            <Card key={config.id}>
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                      <h4 className="text-sm font-semibold text-slate-800">
-                        {config.name}
-                      </h4>
-                      <Badge variant="outline">{config.provider}</Badge>
-                      {testResults[config.id] === 'success' && (
-                        <Badge variant="success">已连接</Badge>
-                      )}
+          {config.llmConfigs.map((storeCfg) => {
+            const localCfg = storeToLocal(storeCfg);
+            return (
+              <Card key={storeCfg.id}>
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <h4 className="text-sm font-semibold text-slate-800">
+                          {localCfg.name}
+                        </h4>
+                        <Badge variant="outline">{localCfg.provider}</Badge>
+                        {testResults[storeCfg.id] === 'success' && (
+                          <Badge variant="success">已连接</Badge>
+                        )}
+                        {testResults[storeCfg.id] === 'fail' && (
+                          <Badge variant="danger">连接失败</Badge>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-500">
+                        <div>
+                          <span className="text-slate-400">模型：</span>
+                          {localCfg.model}
+                        </div>
+                        <div>
+                          <span className="text-slate-400">温度：</span>
+                          {localCfg.temperature}
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Base URL：</span>
+                          <span className="truncate">{localCfg.baseUrl}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">最大Token：</span>
+                          {localCfg.maxTokens}
+                        </div>
+                      </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-500">
-                      <div>
-                        <span className="text-slate-400">模型：</span>
-                        {config.model}
-                      </div>
-                      <div>
-                        <span className="text-slate-400">温度：</span>
-                        {config.temperature}
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Base URL：</span>
-                        <span className="truncate">{config.baseUrl}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">最大Token：</span>
-                        {config.maxTokens}
-                      </div>
+                    <div className="flex items-center gap-1 ml-4">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleTestConnection(storeCfg)}
+                        loading={testingId === storeCfg.id}
+                        icon={
+                          testingId === storeCfg.id
+                            ? undefined
+                            : testResults[storeCfg.id] === 'success'
+                              ? <Wifi size={14} className="text-emerald-500" />
+                              : <WifiOff size={14} />
+                        }
+                      >
+                        测试
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEditConfig(storeCfg)}
+                        icon={<Edit3 size={14} />}
+                      >
+                        编辑
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteConfig(storeCfg.id)}
+                        icon={<Trash2 size={14} />}
+                        className="text-slate-400 hover:text-red-500"
+                      >
+                        删除
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 ml-4">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleTestConnection(config.id)}
-                      loading={testingId === config.id}
-                      icon={
-                        testingId === config.id ? undefined : testResults[config.id] === 'success' ? <Wifi size={14} className="text-emerald-500" /> : <WifiOff size={14} />
-                      }
-                    >
-                      测试
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleEditConfig(config)}
-                      icon={<Edit3 size={14} />}
-                    >
-                      编辑
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDeleteConfig(config.id)}
-                      icon={<Trash2 size={14} />}
-                      className="text-slate-400 hover:text-red-500"
-                    >
-                      删除
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
+          {config.llmConfigs.length === 0 && (
+            <div className="text-center py-8 text-sm text-slate-400">
+              暂无 LLM 配置，点击上方"添加配置"开始
+            </div>
+          )}
         </div>
       </div>
 
@@ -290,7 +420,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">
-                  提供商
+                  接口格式
                 </label>
                 <select
                   value={editingConfig.provider}
@@ -304,9 +434,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
                              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="zhipu">智谱AI</option>
+                  <option value="claude">Anthropic (Claude)</option>
+                  <option value="ollama">Ollama</option>
+                  <option value="gemini">Gemini</option>
                   <option value="custom">自定义</option>
                 </select>
               </div>
@@ -430,23 +560,24 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
           分任务模型指派
         </h3>
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          {taskAssignments.map((assignment) => (
+          {taskLabels.map(({ key, label }) => (
             <div
-              key={assignment.task}
+              key={key}
               className="flex flex-col gap-1.5 p-3 rounded-lg border border-slate-200 bg-white"
             >
               <label className="text-xs font-medium text-slate-600">
-                {assignment.label}
+                {label}
               </label>
               <select
-                value={assignment.configId}
+                value={config.taskAssignment[key]}
                 onChange={(e) =>
-                  handleTaskAssignmentChange(assignment.task, e.target.value)
+                  handleTaskAssignmentChange(key, e.target.value)
                 }
                 className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm
                            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                {llmConfigs.map((cfg) => (
+                <option value="">未指定</option>
+                {config.llmConfigs.map((cfg) => (
                   <option key={cfg.id} value={cfg.id}>
                     {cfg.name}
                   </option>
@@ -459,31 +590,67 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
     </div>
   );
 
+  // ============================================================================
+  // 渲染：风格管理 Tab
+  // ============================================================================
+
   const renderStyleTab = () => (
     <div className="space-y-6">
       {/* 预设风格 */}
       <div>
         <h3 className="text-sm font-semibold text-slate-700 mb-4">预设风格</h3>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {stylePresets.map((preset) => (
-            <Card key={preset.id} hoverable>
-              <CardContent className="p-4">
-                <h4 className="text-sm font-semibold text-slate-800 mb-1">
-                  {preset.name}
-                </h4>
-                <p className="text-xs text-slate-500 mb-3">{preset.description}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {preset.features.map((feature) => (
-                    <Badge key={feature} variant="info">
-                      {feature}
-                    </Badge>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+          {stylePresets.map((preset) => {
+            const isSelected = config.defaultStyle === preset.id;
+            return (
+              <Card
+                key={preset.id}
+                hoverable
+                className={isSelected ? 'ring-2 ring-blue-500 border-blue-300' : ''}
+                onClick={() => handleSelectPresetStyle(preset.id)}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-sm font-semibold text-slate-800">
+                      {preset.name}
+                    </h4>
+                    {isSelected && (
+                      <Badge variant="success">当前</Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 mb-3">{preset.description}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {preset.features.map((feature) => (
+                      <Badge key={feature} variant="info">
+                        {feature}
+                      </Badge>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       </div>
+
+      {/* 自定义风格列表 */}
+      {config.customStyles.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700 mb-4">已保存的自定义风格</h3>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {config.customStyles.map((style) => (
+              <Card key={style.name} hoverable>
+                <CardContent className="p-4">
+                  <h4 className="text-sm font-semibold text-slate-800 mb-1">
+                    {style.name}
+                  </h4>
+                  <p className="text-xs text-slate-500">{style.description}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 自定义风格编辑器 */}
       <div>
@@ -497,6 +664,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
                 </label>
                 <input
                   type="text"
+                  value={customStyleName}
+                  onChange={(e) => setCustomStyleName(e.target.value)}
                   placeholder="输入风格名称"
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm
                              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
@@ -508,8 +677,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
                   风格描述
                 </label>
                 <textarea
-                  value={customStyle}
-                  onChange={(e) => setCustomStyle(e.target.value)}
+                  value={customStyleDesc}
+                  onChange={(e) => setCustomStyleDesc(e.target.value)}
                   placeholder="描述你的写作风格特征，包括叙事方式、语言特点、情感基调等..."
                   rows={6}
                   className="
@@ -520,7 +689,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
                 />
               </div>
               <div className="flex justify-end">
-                <Button variant="primary" size="sm" icon={<Save size={14} />}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  icon={<Save size={14} />}
+                  onClick={handleSaveCustomStyle}
+                >
                   保存风格
                 </Button>
               </div>
@@ -530,6 +704,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
       </div>
     </div>
   );
+
+  // ============================================================================
+  // 渲染：编辑器偏好 Tab
+  // ============================================================================
 
   const renderEditorTab = () => (
     <div className="space-y-6">
@@ -681,12 +859,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
       </Card>
 
       <div className="flex justify-end">
-        <Button variant="primary" icon={<Save size={16} />} onClick={() => onSave?.(editorPrefs)}>
+        <Button variant="primary" icon={<Save size={16} />} onClick={handleSaveEditorPrefs}>
           保存设置
         </Button>
       </div>
     </div>
   );
+
+  // ============================================================================
+  // 主渲染
+  // ============================================================================
 
   return (
     <div className="h-full flex flex-col bg-white">

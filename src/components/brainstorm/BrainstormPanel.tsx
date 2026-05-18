@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Send,
   ArrowLeft,
@@ -9,6 +9,10 @@ import {
 } from 'lucide-react';
 import Button from '../common/Button';
 import LoadingSpinner from '../common/LoadingSpinner';
+import { useAppState, useAppDispatch, projectActions, uiActions } from '../../store';
+import { useToast } from '../common/Toast';
+import { AIPipeline } from '../../services/aiPipeline';
+import type { BrainstormDimension, NovelProject } from '../../types';
 
 /** 灵感收束的9个维度 */
 const DIMENSIONS = [
@@ -23,6 +27,52 @@ const DIMENSIONS = [
   '独特卖点',
 ];
 
+/** DIMENSIONS 数组索引 0-8 对应 BrainstormDimension 类型 */
+const DIMENSION_TYPES: BrainstormDimension[] = [
+  'inspiration',
+  'genre',
+  'theme',
+  'protagonist',
+  'worldview',
+  'conflict',
+  'opening',
+  'style',
+  'word_count',
+];
+
+const pipeline = new AIPipeline();
+
+/** 将 pipeline.brainstormConfirm 返回的 Partial<NovelProject> 转换为 Markdown 预览 */
+function buildPreviewFromProjectData(data: Partial<NovelProject>): string {
+  return `# 项目蓝图
+
+## 核心概念
+${data.coreSeed ?? '待完善'}
+
+## 类型与风格
+- 类型：${data.genre ?? '待定'}
+- 风格：${data.style?.description ?? '待定'}
+
+## 世界观设定
+${data.worldBuilding ?? '待完善'}
+
+## 主角设定
+${data.coreSeed ?? '待完善'}
+
+## 核心冲突
+${data.conflict ?? '待完善'}
+
+## 情感基调
+${data.style?.description ?? '待完善'}
+
+## 目标字数
+- 总字数：${data.targetWords?.toLocaleString() ?? '待定'}
+- 每章字数：${data.chapterTargetWords?.toLocaleString() ?? '待定'}
+
+---
+*由 NovelFlow 灵感收束引擎生成*`;
+}
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'ai';
@@ -31,22 +81,51 @@ interface ChatMessage {
   timestamp: Date;
 }
 
-interface BrainstormPanelProps {
-  onComplete?: (projectMd: string) => void;
-  onBack?: () => void;
-}
+const BrainstormPanel: React.FC = () => {
+  const state = useAppState();
+  const dispatch = useAppDispatch();
+  const { addToast } = useToast();
 
-const BrainstormPanel: React.FC<BrainstormPanelProps> = ({
-  onComplete,
-  onBack,
-}) => {
-  const [currentDimension, setCurrentDimension] = useState(0);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const storeMessages = state.project.brainstormMessages;
+
+  // 从 store 恢复对话历史
+  const restoredMessages = useMemo<ChatMessage[]>(() => {
+    return storeMessages.map((msg) => ({
+      id: msg.id,
+      role: msg.role === 'assistant' ? 'ai' : 'user',
+      content: msg.content,
+      timestamp: new Date(msg.timestamp),
+    }));
+  }, [storeMessages]);
+
+  // 从 store 消息推断当前维度进度
+  const restoredDimension = useMemo(() => {
+    if (storeMessages.length === 0) return 0;
+    // 找到最后一条有维度的 assistant 消息
+    for (let i = storeMessages.length - 1; i >= 0; i--) {
+      const msg = storeMessages[i];
+      const dimIndex = DIMENSION_TYPES.indexOf(msg.dimension);
+      if (dimIndex >= 0) return dimIndex;
+    }
+    return 0;
+  }, [storeMessages]);
+
+  const restoredCompleted = useMemo(() => {
+    const completed = new Array(DIMENSIONS.length).fill(false) as boolean[];
+    for (const msg of storeMessages) {
+      const dimIndex = DIMENSION_TYPES.indexOf(msg.dimension);
+      if (dimIndex >= 0 && msg.role === 'assistant') {
+        completed[dimIndex] = true;
+      }
+    }
+    return completed;
+  }, [storeMessages]);
+
+  const [currentDimension, setCurrentDimension] = useState(restoredDimension);
+  const [messages, setMessages] = useState<ChatMessage[]>(restoredMessages);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [completedDimensions, setCompletedDimensions] = useState<boolean[]>(
-    new Array(DIMENSIONS.length).fill(false)
-  );
+  const [completedDimensions, setCompletedDimensions] = useState<boolean[]>(restoredCompleted);
   const [showPreview, setShowPreview] = useState(false);
   const [previewContent, setPreviewContent] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -59,35 +138,71 @@ const BrainstormPanel: React.FC<BrainstormPanelProps> = ({
     scrollToBottom();
   }, [messages]);
 
-  // 初始化第一条AI消息
+  // 初始化第一条AI消息（仅在没有历史消息时发送）
   useEffect(() => {
-    if (messages.length === 0) {
-      addAIMessage(
-        `欢迎来到灵感收束！我们将通过 ${DIMENSIONS.length} 个维度来构建你的小说蓝图。\n\n让我们从第一个维度开始：**${DIMENSIONS[0]}**\n\n请描述你想要创作的小说的核心概念是什么？`,
-        ['我想写一个关于...的故事', '让我想想...', '我有一个大致的想法']
+    if (storeMessages.length === 0) {
+      const welcomeMsg: ChatMessage = {
+        id: `ai-${Date.now()}`,
+        role: 'ai',
+        content: `欢迎来到灵感收束！我们将通过 ${DIMENSIONS.length} 个维度来构建你的小说蓝图。\n\n让我们从第一个维度开始：**${DIMENSIONS[0]}**\n\n请描述你想要创作的小说的核心概念是什么？`,
+        options: ['我想写一个关于...的故事', '让我想想...', '我有一个大致的想法'],
+        timestamp: new Date(),
+      };
+      setMessages([welcomeMsg]);
+      dispatch(
+        projectActions.addBrainstormMessage({
+          id: welcomeMsg.id,
+          role: 'assistant',
+          content: welcomeMsg.content,
+          dimension: DIMENSION_TYPES[0],
+          confirmed: false,
+          timestamp: welcomeMsg.timestamp.toISOString(),
+        })
       );
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const addAIMessage = (content: string, options?: string[]) => {
+  const addAIMessage = (content: string, options?: string[], dimension?: BrainstormDimension) => {
+    const id = `ai-${Date.now()}`;
     const msg: ChatMessage = {
-      id: `ai-${Date.now()}`,
+      id,
       role: 'ai',
       content,
       options,
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, msg]);
+    dispatch(
+      projectActions.addBrainstormMessage({
+        id,
+        role: 'assistant',
+        content,
+        dimension: dimension ?? DIMENSION_TYPES[currentDimension],
+        confirmed: false,
+        timestamp: msg.timestamp.toISOString(),
+      })
+    );
   };
 
   const addUserMessage = (content: string) => {
+    const id = `user-${Date.now()}`;
     const msg: ChatMessage = {
-      id: `user-${Date.now()}`,
+      id,
       role: 'user',
       content,
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, msg]);
+    dispatch(
+      projectActions.addBrainstormMessage({
+        id,
+        role: 'user',
+        content,
+        dimension: DIMENSION_TYPES[currentDimension],
+        confirmed: false,
+        timestamp: msg.timestamp.toISOString(),
+      })
+    );
   };
 
   const handleSend = () => {
@@ -96,52 +211,123 @@ const BrainstormPanel: React.FC<BrainstormPanelProps> = ({
 
     addUserMessage(text);
     setInputValue('');
-    simulateAIResponse(text);
+    handleAIResponse(text);
   };
 
   const handleOptionClick = (option: string) => {
     if (isLoading) return;
     addUserMessage(option);
-    simulateAIResponse(option);
+    handleAIResponse(option);
   };
 
+  /** 模拟模式：使用 setTimeout 模拟 AI 回复（降级方案） */
   const simulateAIResponse = (_userInput: string) => {
+    const nextDim = currentDimension + 1;
+
+    if (nextDim < DIMENSIONS.length) {
+      // 还有下一个维度
+      addAIMessage(
+        `很好！关于"${DIMENSIONS[currentDimension]}"的信息已记录。\n\n接下来是第 ${nextDim + 1} 个维度：**${DIMENSIONS[nextDim]}**\n\n请描述你的小说在${DIMENSIONS[nextDim]}方面的设定：`,
+        ['参考经典作品', '我有明确的想法', '需要更多灵感'],
+        DIMENSION_TYPES[nextDim]
+      );
+      setCurrentDimension(nextDim);
+    } else {
+      // 所有维度完成
+      setCompletedDimensions((prev) =>
+        prev.map((_, i) => (i <= currentDimension ? true : false))
+      );
+      const samplePreview = generateSamplePreview();
+      setPreviewContent(samplePreview);
+      setShowPreview(true);
+      addAIMessage(
+        `太棒了！所有 ${DIMENSIONS.length} 个维度的灵感收束已完成。\n\n我已经根据你的描述生成了项目蓝图（project.md）的预览，请查看并确认。`,
+        [],
+        DIMENSION_TYPES[currentDimension]
+      );
+      // 所有维度完成时，切换到 outline 阶段
+      dispatch(projectActions.setStage('outline'));
+      dispatch(projectActions.setStatus('planned'));
+    }
+
+    // 标记当前维度为已完成
+    setCompletedDimensions((prev) => {
+      const next = [...prev];
+      next[currentDimension] = true;
+      return next;
+    });
+  };
+
+  const handleAIResponse = async (userInput: string) => {
     setIsLoading(true);
 
-    // 模拟AI响应延迟
-    setTimeout(() => {
-      const nextDim = currentDimension + 1;
+    try {
+      // 检查是否有 LLM 配置
+      const hasLLM = state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0;
 
-      if (nextDim < DIMENSIONS.length) {
-        // 还有下一个维度
-        addAIMessage(
-          `很好！关于"${DIMENSIONS[currentDimension]}"的信息已记录。\n\n接下来是第 ${nextDim + 1} 个维度：**${DIMENSIONS[nextDim]}**\n\n请描述你的小说在${DIMENSIONS[nextDim]}方面的设定：`,
-          ['参考经典作品', '我有明确的想法', '需要更多灵感']
-        );
-        setCurrentDimension(nextDim);
+      if (hasLLM) {
+        // 真实 LLM 调用
+        const nextDim = currentDimension + 1;
+
+        if (nextDim < DIMENSIONS.length) {
+          // 调用 AI Pipeline 获取下一个维度的问题
+          const history = state.project.brainstormMessages;
+          const aiResponse = await pipeline.brainstormNextQuestion(
+            DIMENSION_TYPES[nextDim],
+            history,
+            state.project.currentProject ?? undefined
+          );
+
+          addAIMessage(aiResponse, undefined, DIMENSION_TYPES[nextDim]);
+          setCurrentDimension(nextDim);
+        } else {
+          // 所有维度完成，调用确认
+          const history = state.project.brainstormMessages;
+          const projectData = await pipeline.brainstormConfirm(history);
+
+          // 生成预览内容
+          const preview = buildPreviewFromProjectData(projectData);
+          setPreviewContent(preview);
+          setShowPreview(true);
+
+          addAIMessage(
+            `太棒了！所有 ${DIMENSIONS.length} 个维度的灵感收束已完成。\n\n我已经根据你的描述生成了项目蓝图（project.md）的预览，请查看并确认。`,
+            [],
+            DIMENSION_TYPES[currentDimension]
+          );
+
+          dispatch(projectActions.setStage('outline'));
+          dispatch(projectActions.setStatus('planned'));
+        }
       } else {
-        // 所有维度完成
-        setCompletedDimensions((prev) =>
-          prev.map((_, i) => (i <= currentDimension ? true : false))
-        );
-        const samplePreview = generateSamplePreview();
-        setPreviewContent(samplePreview);
-        setShowPreview(true);
-        addAIMessage(
-          `太棒了！所有 ${DIMENSIONS.length} 个维度的灵感收束已完成。\n\n我已经根据你的描述生成了项目蓝图（project.md）的预览，请查看并确认。`,
-          []
-        );
+        // 无 LLM 配置时使用模拟模式
+        setTimeout(() => {
+          simulateAIResponse(userInput);
+          setIsLoading(false);
+        }, 1500);
+        return; // setTimeout 会处理 setIsLoading(false)
       }
-
+    } catch (error) {
+      addToast('error', `AI 调用失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      // 降级为模拟模式
+      setTimeout(() => {
+        simulateAIResponse(userInput);
+        setIsLoading(false);
+      }, 1500);
+      return; // setTimeout 会处理 setIsLoading(false)
+    } finally {
       // 标记当前维度为已完成
       setCompletedDimensions((prev) => {
         const next = [...prev];
         next[currentDimension] = true;
         return next;
       });
-
-      setIsLoading(false);
-    }, 1500);
+      // 仅在真实 LLM 调用路径时在 finally 中设置 loading
+      const hasLLM = state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0;
+      if (hasLLM) {
+        setIsLoading(false);
+      }
+    }
   };
 
   const generateSamplePreview = () => {
@@ -184,7 +370,8 @@ const BrainstormPanel: React.FC<BrainstormPanelProps> = ({
   };
 
   const handleConfirmPreview = () => {
-    onComplete?.(previewContent);
+    dispatch(projectActions.update({ coreSeed: previewContent, status: 'planned', stage: 'outline' }));
+    dispatch(uiActions.setView('home'));
   };
 
   const handlePrevDimension = () => {
@@ -206,14 +393,12 @@ const BrainstormPanel: React.FC<BrainstormPanelProps> = ({
       <div className="shrink-0 border-b border-slate-200">
         <div className="flex items-center justify-between px-5 py-3">
           <div className="flex items-center gap-3">
-            {onBack && (
-              <button
-                onClick={onBack}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-              >
-                <ArrowLeft size={18} />
-              </button>
-            )}
+            <button
+              onClick={() => dispatch(uiActions.setView('home'))}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            >
+              <ArrowLeft size={18} />
+            </button>
             <div>
               <h2 className="text-sm font-semibold text-slate-900">
                 灵感收束
