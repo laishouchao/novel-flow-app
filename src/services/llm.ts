@@ -577,13 +577,21 @@ export class LLMService {
 
   /**
    * 构建 API URL
+   * 支持两种格式：
+   * 1. 基础URL: https://api.openai.com/v1 -> 自动添加 /chat/completions
+   * 2. 完整URL: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions -> 直接使用
    */
   private buildUrl(config: LLMServiceConfig): string {
-    let baseUrl = config.baseUrl.replace(/\/+$/, '');
-    if (!baseUrl.endsWith('/chat/completions')) {
-      baseUrl += '/chat/completions';
+    let baseUrl = config.baseUrl.trim();
+    
+    // 如果已经是完整路径，直接使用
+    if (baseUrl.includes('/chat/completions')) {
+      return baseUrl.replace(/\/+$/, '');
     }
-    return baseUrl;
+    
+    // 否则添加 /chat/completions
+    baseUrl = baseUrl.replace(/\/+$/, '');
+    return baseUrl + '/chat/completions';
   }
 
   /**
