@@ -552,29 +552,80 @@ export class LLMService {
   /**
    * 测试 LLM 连接是否正常
    * @param config LLM 配置
-   * @returns 测试结果，包含成功/失败状态和错误信息
+   * @returns 测试结果，包含成功/失败状态和详细错误信息
    */
-  async testConnection(config: LLMServiceConfig): Promise<{ success: boolean; error?: string }> {
+  async testConnection(config: LLMServiceConfig): Promise<{ success: boolean; error?: string; details?: string }> {
+    const url = this.buildUrl(config);
+    const body = this.buildRequestBody(
+      [{ role: 'user', content: '请回复"连接成功"四个字。' }],
+      { ...config, maxTokens: 20, timeout: 15000 },
+      false,
+    );
+    const headers = this.buildHeaders(config);
+
     try {
-      const response = await this.chat(
-        [
-          { role: 'user', content: '请回复"连接成功"四个字。' },
-        ],
-        {
-          ...config,
-          maxTokens: 20,
-          timeout: 15000,
-        },
-      );
-      return { success: response.content.length > 0 };
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      // 获取原始响应文本用于调试
+      const responseText = await response.text();
+
+      if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        let parsedError: Record<string, unknown> | null = null;
+
+        try {
+          parsedError = JSON.parse(responseText);
+          if (parsedError?.error) {
+            const apiError = parsedError.error as Record<string, string>;
+            errorMessage = `${apiError.code || 'API_ERROR'}: ${apiError.message || response.statusText}`;
+          }
+        } catch {
+          // 解析失败，使用原始响应
+          if (responseText) {
+            errorMessage += ` | 原始响应: ${responseText.substring(0, 500)}`;
+          }
+        }
+
+        return {
+          success: false,
+          error: errorMessage,
+          details: `请求URL: ${url}\n状态码: ${response.status}\n原始响应: ${responseText.substring(0, 1000)}`,
+        };
+      }
+
+      // 解析成功响应
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        return {
+          success: false,
+          error: '响应解析失败',
+          details: `无法解析JSON响应: ${responseText.substring(0, 500)}`,
+        };
+      }
+
+      const content = this.extractContent(data);
+      if (content.length > 0) {
+        return { success: true };
+      }
+
+      return {
+        success: false,
+        error: '响应内容为空',
+        details: `完整响应: ${JSON.stringify(data, null, 2).substring(0, 1000)}`,
+      };
     } catch (error) {
-      if (error instanceof LLMServiceError) {
-        return { success: false, error: error.message };
-      }
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        return { success: false, error: '网络请求失败，请检查网络连接或URL是否正确' };
-      }
-      return { success: false, error: error instanceof Error ? error.message : '未知错误' };
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        error: `请求失败: ${errorMsg}`,
+        details: `请求URL: ${url}\n错误类型: ${error?.constructor?.name || 'Unknown'}\n完整错误: ${errorMsg}`,
+      };
     }
   }
 

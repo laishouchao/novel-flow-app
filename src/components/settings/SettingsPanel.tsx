@@ -162,6 +162,7 @@ const SettingsPanel: React.FC = () => {
   const [isNewConfig, setIsNewConfig] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, 'success' | 'fail'>>({});
+  const [testErrorDetails, setTestErrorDetails] = useState<Record<string, string>>({});
 
   const [editorPrefs, setEditorPrefs] = useState<EditorPreferences>({
     fontSize: 16,
@@ -234,8 +235,13 @@ const SettingsPanel: React.FC = () => {
       setTestResults((prev) => ({ ...prev, [storeConfig.id]: result.success ? 'success' : 'fail' }));
       if (result.success) {
         addToast('success', '连接成功');
+        setTestErrorDetails((prev) => ({ ...prev, [storeConfig.id]: '' }));
       } else {
         addToast('error', `连接失败: ${result.error || '请检查 API Key 和 URL 是否正确'}`);
+        if (result.details) {
+          setTestErrorDetails((prev) => ({ ...prev, [storeConfig.id]: result.details! }));
+          console.error('[TestConnection] 详细错误:', result.details);
+        }
       }
     } catch (error) {
       setTestResults((prev) => ({ ...prev, [storeConfig.id]: 'fail' }));
@@ -334,6 +340,11 @@ const SettingsPanel: React.FC = () => {
                           <Badge variant="danger">连接失败</Badge>
                         )}
                       </div>
+                      {testResults[storeCfg.id] === 'fail' && testErrorDetails[storeCfg.id] && (
+                        <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700 font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
+                          {testErrorDetails[storeCfg.id]}
+                        </div>
+                      )}
                       <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-500">
                         <div>
                           <span className="text-slate-400">模型：</span>
