@@ -552,8 +552,9 @@ export class LLMService {
   /**
    * 测试 LLM 连接是否正常
    * @param config LLM 配置
+   * @returns 测试结果，包含成功/失败状态和错误信息
    */
-  async testConnection(config: LLMServiceConfig): Promise<boolean> {
+  async testConnection(config: LLMServiceConfig): Promise<{ success: boolean; error?: string }> {
     try {
       const response = await this.chat(
         [
@@ -565,9 +566,15 @@ export class LLMService {
           timeout: 15000,
         },
       );
-      return response.content.length > 0;
-    } catch {
-      return false;
+      return { success: response.content.length > 0 };
+    } catch (error) {
+      if (error instanceof LLMServiceError) {
+        return { success: false, error: error.message };
+      }
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        return { success: false, error: '网络请求失败，请检查网络连接或URL是否正确' };
+      }
+      return { success: false, error: error instanceof Error ? error.message : '未知错误' };
     }
   }
 

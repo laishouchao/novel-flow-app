@@ -230,12 +230,16 @@ const SettingsPanel: React.FC = () => {
       timeout: 15000,
     };
     try {
-      const ok = await llmService.testConnection(serviceConfig);
-      setTestResults((prev) => ({ ...prev, [storeConfig.id]: ok ? 'success' : 'fail' }));
-      addToast(ok ? 'success' : 'error', ok ? '连接成功' : '连接失败');
-    } catch {
+      const result = await llmService.testConnection(serviceConfig);
+      setTestResults((prev) => ({ ...prev, [storeConfig.id]: result.success ? 'success' : 'fail' }));
+      if (result.success) {
+        addToast('success', '连接成功');
+      } else {
+        addToast('error', `连接失败: ${result.error || '请检查 API Key 和 URL 是否正确'}`);
+      }
+    } catch (error) {
       setTestResults((prev) => ({ ...prev, [storeConfig.id]: 'fail' }));
-      addToast('error', '连接失败');
+      addToast('error', `连接失败: ${error instanceof Error ? error.message : '未知错误'}`);
     } finally {
       setTestingId(null);
     }
