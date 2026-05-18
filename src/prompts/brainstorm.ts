@@ -371,7 +371,29 @@ export const brainstormDimensions = [
 ] as const;
 
 /**
+ * 类型系统 BrainstormDimension 到 prompts 维度 ID 的映射
+ * 确保组件使用的维度名能正确找到对应的提示词模板
+ */
+const dimensionTypeToPromptId: Record<string, string> = {
+  // types/index.ts BrainstormDimension -> prompts 维度 ID
+  inspiration: 'genreTone',
+  genre: 'genreTone',
+  theme: 'coreConflict',
+  conflict: 'coreConflict',
+  protagonist: 'protagonist',
+  worldview: 'worldSetting',
+  opening: 'narrativeStructure',
+  style: 'emotionalCore',
+  word_count: 'uniqueSellingPoint',
+  non_goals: 'characterRelationships',
+  confirm: 'endgameVision',
+};
+
+/**
  * 根据维度 ID 获取对应的提示词模板
+ * 支持两种维度 ID 格式：
+ * 1. prompts 维度 ID: genreTone, coreConflict 等
+ * 2. types BrainstormDimension: inspiration, genre 等（自动转换）
  */
 export function getDimensionPrompt(dimensionId: string): string | undefined {
   const promptMap: Record<string, string> = {
@@ -385,7 +407,19 @@ export function getDimensionPrompt(dimensionId: string): string | undefined {
     characterRelationships: characterRelationshipsPrompt,
     endgameVision: endgameVisionPrompt,
   };
-  return promptMap[dimensionId];
+
+  // 先直接查找
+  if (promptMap[dimensionId]) {
+    return promptMap[dimensionId];
+  }
+
+  // 尝试通过类型映射查找
+  const mappedId = dimensionTypeToPromptId[dimensionId];
+  if (mappedId && promptMap[mappedId]) {
+    return promptMap[mappedId];
+  }
+
+  return undefined;
 }
 
 /**

@@ -98,8 +98,8 @@ function WritingDesk() {
         chapterWordCount={state.editor.currentChapter?.wordCount}
         totalWordCount={state.project.chapters.reduce((sum, c) => sum + c.wordCount, 0)}
         targetWordCount={state.project.currentProject.targetWords}
-        aiModelStatus={state.ai.activeLLM ? 'connected' : 'disconnected'}
-        aiModelName={state.ai.activeLLM?.model}
+        aiModelStatus={state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0 ? 'connected' : 'disconnected'}
+        aiModelName={state.ai.activeLLM?.model ?? (state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0 ? state.ai.config.llmConfigs[0].model : '未配置')}
       />
     </div>
   );
