@@ -12,6 +12,8 @@
  * - 错误处理
  */
 
+import { invoke } from '@tauri-apps/api/tauri';
+
 // ============================================================
 // 类型定义
 // ============================================================
@@ -335,31 +337,43 @@ export class LLMService {
     const body = this.buildRequestBody(messages, resolvedConfig, false);
     const headers = this.buildHeaders(resolvedConfig);
 
-    const controller = new AbortController();
-    const timeout = resolvedConfig.timeout ?? 60000;
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: controller.signal,
+      // 使用 Tauri 命令发送 HTTP 请求，绕过 CORS 限制
+      const response = await invoke<{
+        status: number;
+        status_text: string;
+        headers: Record<string, string>;
+        body: string;
+      }>('http_request', {
+        request: {
+          url,
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        },
       });
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = await this.parseErrorResponse(response);
+      if (response.status < 200 || response.status >= 300) {
+        let errorMessage = `HTTP ${response.status}: ${response.status_text}`;
+        try {
+          const errorData = JSON.parse(response.body);
+          if (errorData.error) {
+            errorMessage = `${errorData.error.code || 'API_ERROR'}: ${errorData.error.message || response.status_text}`;
+          }
+        } catch {
+          if (response.body) {
+            errorMessage += ` | 响应: ${response.body.substring(0, 500)}`;
+          }
+        }
         throw new LLMServiceError({
-          code: errorData.code ?? 'API_ERROR',
-          message: errorData.message ?? `HTTP ${response.status}: ${response.statusText}`,
+          code: 'API_ERROR',
+          message: errorMessage,
           statusCode: response.status,
           retryable: response.status === 429 || response.status >= 500,
         });
       }
 
-      const data = await response.json();
+      const data = JSON.parse(response.body);
       const content = this.extractContent(data);
       const cleanedContent = cleanThinkTags(content);
       const usage = data.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
@@ -372,8 +386,14 @@ export class LLMService {
         totalTokens: usage.total_tokens ?? 0,
       };
     } catch (error) {
-      clearTimeout(timeoutId);
-      throw error;
+      if (error instanceof LLMServiceError) {
+        throw error;
+      }
+      throw new LLMServiceError({
+        code: 'REQUEST_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      });
     }
   }
 
@@ -564,48 +584,50 @@ export class LLMService {
     const headers = this.buildHeaders(config);
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
+      // 使用 Tauri 命令发送 HTTP 请求
+      const response = await invoke<{
+        status: number;
+        status_text: string;
+        headers: Record<string, string>;
+        body: string;
+      }>('http_request', {
+        request: {
+          url,
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        },
       });
 
-      // 获取原始响应文本用于调试
-      const responseText = await response.text();
-
-      if (!response.ok) {
-        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-        let parsedError: Record<string, unknown> | null = null;
-
+      if (response.status < 200 || response.status >= 300) {
+        let errorMessage = `HTTP ${response.status}: ${response.status_text}`;
         try {
-          parsedError = JSON.parse(responseText);
-          if (parsedError?.error) {
-            const apiError = parsedError.error as Record<string, string>;
-            errorMessage = `${apiError.code || 'API_ERROR'}: ${apiError.message || response.statusText}`;
+          const errorData = JSON.parse(response.body);
+          if (errorData.error) {
+            errorMessage = `${errorData.error.code || 'API_ERROR'}: ${errorData.error.message || response.status_text}`;
           }
         } catch {
-          // 解析失败，使用原始响应
-          if (responseText) {
-            errorMessage += ` | 原始响应: ${responseText.substring(0, 500)}`;
+          if (response.body) {
+            errorMessage += ` | 原始响应: ${response.body.substring(0, 500)}`;
           }
         }
 
         return {
           success: false,
           error: errorMessage,
-          details: `请求URL: ${url}\n状态码: ${response.status}\n原始响应: ${responseText.substring(0, 1000)}`,
+          details: `请求URL: ${url}\n状态码: ${response.status}\n原始响应: ${response.body.substring(0, 1000)}`,
         };
       }
 
       // 解析成功响应
       let data: Record<string, unknown>;
       try {
-        data = JSON.parse(responseText);
+        data = JSON.parse(response.body);
       } catch {
         return {
           success: false,
           error: '响应解析失败',
-          details: `无法解析JSON响应: ${responseText.substring(0, 500)}`,
+          details: `无法解析JSON响应: ${response.body.substring(0, 500)}`,
         };
       }
 

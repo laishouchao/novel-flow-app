@@ -26,6 +26,10 @@
         "scope": [
           "**"
         ]
+      },
+      "http": {
+        "all": true,
+        "request": true
       }
     },
     "bundle": {
@@ -56,7 +60,7 @@
       }
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src 'self' https: http:; script-src 'self'; style-src 'self' 'unsafe-inline'"
     },
     "windows": [
       {
