@@ -18,12 +18,14 @@ import {
   Copy,
   Check,
   AlertCircle,
+  FolderOpen,
 } from 'lucide-react';
 import Button from '../common/Button';
 import { useAppState, useAppDispatch, editorActions, projectActions } from '../../store';
 import { useToast } from '../common/Toast';
 import { AIPipeline, type StreamCallback } from '../../services/aiPipeline';
 import { llmService } from '../../services/llm';
+import ProjectFilePanel from './ProjectFilePanel';
 import type { EditorViewMode, ReviewResult } from '../../types';
 
 type AIAction = 'draft' | 'review' | 'deai' | 'expand' | 'condense';
@@ -143,6 +145,7 @@ const ChapterEditor: React.FC = () => {
   const [content, setContent] = useState(initialContent);
   const [viewMode, setViewMode] = useState<'edit' | 'preview' | 'compare'>(mapEditorViewMode(storeViewMode));
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
+  const [filePanelOpen, setFilePanelOpen] = useState(true);
   const [selectedAction, setSelectedAction] = useState<AIAction | null>(null);
   const [promptText, setPromptText] = useState('');
   const [aiOutput, setAiOutput] = useState('');
@@ -348,6 +351,18 @@ const ChapterEditor: React.FC = () => {
             </button>
           </div>
 
+          {/* 文件面板切换 */}
+          <button
+            onClick={() => setFilePanelOpen(!filePanelOpen)}
+            className={`
+              p-2 rounded-lg transition-colors
+              ${filePanelOpen ? 'bg-amber-50 text-amber-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}
+            `}
+            title={filePanelOpen ? '收起文件面板' : '展开文件面板'}
+          >
+            <FolderOpen size={18} />
+          </button>
+
           {/* AI面板切换 */}
           <button
             onClick={() => setAiPanelOpen(!aiPanelOpen)}
@@ -375,6 +390,9 @@ const ChapterEditor: React.FC = () => {
 
       {/* 主内容区域 */}
       <div className="flex-1 flex overflow-hidden">
+        {/* 项目文件面板 */}
+        <ProjectFilePanel isOpen={filePanelOpen} onToggle={() => setFilePanelOpen(!filePanelOpen)} />
+
         {/* 编辑区域 */}
         <div className="flex-1 flex flex-col">
           {viewMode === 'edit' ? (

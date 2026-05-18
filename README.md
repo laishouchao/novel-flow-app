@@ -1,6 +1,6 @@
 # NovelFlow 小说创作工作台
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/laishouchao/novel-flow-app/releases)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/laishouchao/novel-flow-app/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 一款专为小说创作者设计的桌面端 AI 辅助写作工具，基于 Tauri + React + TypeScript 构建。
@@ -14,6 +14,7 @@
 - 🔍 **智能审查** - AI 自动检查剧情一致性、角色设定、伏笔回收
 - 🎨 **写作风格** - 支持冷峻写实、系统爽文、诡秘悬疑等多种预设风格
 - 💾 **本地存储** - 所有数据保存在本地，保护创作隐私
+- 📁 **项目文件管理** - 写作台内置文件浏览器，查看提示词、章节、角色设定等
 
 ## 🚀 快速开始
 
@@ -71,6 +72,11 @@
   - **润色** - 优化文笔表达
   - **审查** - AI 检查剧情问题
 - 实时字数统计和自动保存
+- **项目文件面板** - 点击工具栏的文件夹图标，展开右侧文件浏览器：
+  - 查看 `project.md` 项目设定
+  - 浏览所有章节文件
+  - 查看角色设定文档
+  - 查看提示词文件和配置
 
 ### 5. 审查与定稿
 
@@ -125,6 +131,16 @@ novel-flow-app/
 ```
 
 ## 📝 更新日志
+
+### v0.3.0 (2025-01-18)
+
+**新功能**
+- 添加项目文件管理面板，写作台右侧可收起/展开
+- 支持查看 project.md、章节文件、角色设定、提示词等
+
+**Bug 修复**
+- 修复切换项目时写作台显示其他项目内容的问题
+- 每个项目现在有独立的写作台状态
 
 ### v0.2.0 (2025-01-18)
 
