@@ -5,7 +5,7 @@ import Card, { CardContent } from '../common/Card';
 import Button from '../common/Button';
 import Badge, { ProjectStatusBadge } from '../common/Badge';
 import ProgressBar from '../common/ProgressBar';
-import { useAppState, useAppDispatch, projectActions, uiActions } from '../../store';
+import { useAppState, useAppDispatch, projectActions, editorActions, uiActions } from '../../store';
 import type { NovelProject } from '../../types';
 
 interface Project {
@@ -63,6 +63,9 @@ const ProjectList: React.FC = () => {
   const handleOpen = (project: Project) => {
     const novelProject = state.project.projects.find((p) => p.id === project.id);
     if (novelProject) {
+      // 切换项目时重置编辑器状态，避免显示其他项目的内容
+      dispatch(editorActions.setContent(''));
+      dispatch(editorActions.setChapter(null));
       dispatch(projectActions.setCurrent(novelProject));
       navigate('/');
     }
