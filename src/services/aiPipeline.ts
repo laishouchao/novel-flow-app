@@ -649,7 +649,7 @@ ${chapter.draftContent}
       { role: 'user', content: userPrompt },
     ];
 
-    const response = await this.llm.chat(messages, undefined, 'consistency');
+    const response = await this.llm.chat(messages, undefined, 'general');
 
     // 解析一致性检查结果
     return this.parseConsistencyResult(response.content);

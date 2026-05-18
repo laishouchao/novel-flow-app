@@ -1,7 +1,8 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AppProvider, useAppState, useAppDispatch, uiActions, selectWritingProgress } from './store';
 import type { ProjectStage } from './types';
+import { llmService } from './services/llm';
 import Sidebar from './components/layout/Sidebar';
 import StatusBar from './components/layout/StatusBar';
 import ProjectList from './components/project/ProjectList';
@@ -144,6 +145,29 @@ function AppLayout() {
 
   const currentProject = state.project.currentProject;
   const progress = selectWritingProgress(state);
+
+  // 初始化 LLM 服务配置提供者
+  useEffect(() => {
+    llmService.setConfigProvider(() => {
+      const aiConfig = state.ai.config;
+      if (!aiConfig || !aiConfig.llmConfigs || aiConfig.llmConfigs.length === 0) {
+        return null;
+      }
+      return {
+        llmConfigs: aiConfig.llmConfigs.map(c => ({
+          id: c.id,
+          name: c.name,
+          baseUrl: c.baseUrl,
+          apiKey: c.apiKey,
+          model: c.model,
+          maxTokens: c.maxTokens,
+          temperature: c.temperature,
+          timeout: c.timeout,
+        })),
+        taskAssignment: aiConfig.taskAssignment,
+      };
+    });
+  }, [state.ai.config]);
 
   // Sidebar 导航
   const currentNav = navFromPath(location.pathname);

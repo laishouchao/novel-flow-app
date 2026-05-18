@@ -59,40 +59,40 @@ export interface LLMStreamOptions {
   /** 流式完成回调 */
   onComplete?: (fullContent: string) => void;
   /** 流式错误回调 */
-  onError?: (error: Error) => void;
+  onError?: (error: LLMServiceError) => void;
 }
 
-export interface LLMError {
+export type TaskType =
+  | 'brainstorm'
+  | 'outline'
+  | 'draft'
+  | 'review'
+  | 'finalization'
+  | 'summary'
+  | 'general';
+
+interface LLMError {
   code: string;
   message: string;
   statusCode?: number;
   retryable: boolean;
 }
 
-export type TaskType =
-  | 'brainstorm'      // 灵感收束
-  | 'outline'         // 大纲生成
-  | 'draft'           // 章节写作
-  | 'review'          // 审查
-  | 'summary'         // 摘要生成
-  | 'consistency'     // 一致性检查
-  | 'finalization'    // 定稿/设定同步
-  | 'general';        // 通用
-
 // ============================================================
 // 配置管理器
 // ============================================================
 
 /**
- * 多配置管理器 -- 不同任务可以使用不同的模型和参数
+ * LLM 配置管理器
+ * 支持多配置管理，不同任务类型可使用不同模型
  */
 export class LLMConfigManager {
-  private configs: Map<string, LLMServiceConfig> = new Map();
+  private configs = new Map<string, LLMServiceConfig>();
   private defaultConfig: LLMServiceConfig | null = null;
 
   /**
-   * 注册一个配置
-   * @param name 配置名称或任务类型
+   * 注册配置
+   * @param name 配置名称（如 'brainstorm', 'draft' 等任务类型）
    * @param config LLM 配置
    * @param isDefault 是否设为默认配置
    */
@@ -105,9 +105,25 @@ export class LLMConfigManager {
 
   /**
    * 获取指定任务类型的配置，回退到默认配置
+   * @throws 如果没有找到任何配置
    */
   get(taskType: TaskType | string): LLMServiceConfig {
-    return this.configs.get(taskType) ?? this.defaultConfig ?? this.configs.values().next().value as LLMServiceConfig;
+    const config = this.configs.get(taskType) ?? this.defaultConfig ?? this.configs.values().next().value;
+    if (!config) {
+      throw new LLMServiceError({
+        code: 'NO_CONFIG',
+        message: `未找到任务类型 "${taskType}" 的 LLM 配置，请先添加配置`,
+        retryable: false,
+      });
+    }
+    return config;
+  }
+
+  /**
+   * 检查是否有任何配置可用
+   */
+  hasAnyConfig(): boolean {
+    return this.configs.size > 0 || !!this.defaultConfig;
   }
 
   /**
@@ -129,6 +145,14 @@ export class LLMConfigManager {
    */
   remove(name: string): boolean {
     return this.configs.delete(name);
+  }
+
+  /**
+   * 清空所有配置
+   */
+  clear(): void {
+    this.configs.clear();
+    this.defaultConfig = null;
   }
 }
 
@@ -215,9 +239,17 @@ export class LLMService {
   private configManager: LLMConfigManager;
   private defaultMaxRetries = 3;
   private defaultRetryDelay = 1000;
+  private configProvider?: () => { llmConfigs: Array<{ id: string; name: string; baseUrl: string; apiKey: string; model: string; maxTokens: number; temperature: number; timeout: number }>; taskAssignment?: Record<string, string> } | null;
 
   constructor(configManager?: LLMConfigManager) {
     this.configManager = configManager ?? new LLMConfigManager();
+  }
+
+  /**
+   * 设置配置提供者（用于从外部 Store 获取配置）
+   */
+  setConfigProvider(provider: () => { llmConfigs: Array<{ id: string; name: string; baseUrl: string; apiKey: string; model: string; maxTokens: number; temperature: number; timeout: number }>; taskAssignment?: Record<string, string> } | null): void {
+    this.configProvider = provider;
   }
 
   /**
@@ -225,6 +257,61 @@ export class LLMService {
    */
   getConfigManager(): LLMConfigManager {
     return this.configManager;
+  }
+
+  /**
+   * 同步外部配置到内部配置管理器
+   */
+  syncConfigs(): void {
+    if (!this.configProvider) return;
+    
+    const externalConfig = this.configProvider();
+    if (!externalConfig || !externalConfig.llmConfigs || externalConfig.llmConfigs.length === 0) {
+      this.configManager.clear();
+      return;
+    }
+
+    // 清空现有配置
+    this.configManager.clear();
+
+    // 注册所有配置
+    for (const config of externalConfig.llmConfigs) {
+      const serviceConfig: LLMServiceConfig = {
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        model: config.model,
+        maxTokens: config.maxTokens,
+        temperature: config.temperature,
+        timeout: config.timeout,
+      };
+      this.configManager.register(config.id, serviceConfig);
+    }
+
+    // 根据任务指派设置默认配置
+    if (externalConfig.taskAssignment) {
+      for (const [taskType, configId] of Object.entries(externalConfig.taskAssignment)) {
+        const config = externalConfig.llmConfigs.find(c => c.id === configId);
+        if (config) {
+          const serviceConfig: LLMServiceConfig = {
+            baseUrl: config.baseUrl,
+            apiKey: config.apiKey,
+            model: config.model,
+            maxTokens: config.maxTokens,
+            temperature: config.temperature,
+            timeout: config.timeout,
+          };
+          this.configManager.register(taskType, serviceConfig);
+        }
+      }
+    }
+  }
+
+  /**
+   * 检查是否有可用的 LLM 配置
+   */
+  hasConfig(): boolean {
+    this.syncConfigs();
+    return this.configManager.hasAnyConfig();
   }
 
   // ----------------------------------------------------------
@@ -242,6 +329,7 @@ export class LLMService {
     config?: LLMServiceConfig,
     taskType: TaskType = 'general',
   ): Promise<LLMResponse> {
+    this.syncConfigs();
     const resolvedConfig = config ?? this.configManager.get(taskType);
     const url = this.buildUrl(resolvedConfig);
     const body = this.buildRequestBody(messages, resolvedConfig, false);
@@ -285,64 +373,40 @@ export class LLMService {
       };
     } catch (error) {
       clearTimeout(timeoutId);
-      if (error instanceof LLMServiceError) throw error;
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        throw new LLMServiceError({
-          code: 'TIMEOUT',
-          message: `请求超时（${timeout}ms）`,
-          retryable: true,
-        });
-      }
-      throw new LLMServiceError({
-        code: 'NETWORK_ERROR',
-        message: error instanceof Error ? error.message : '网络请求失败',
-        retryable: true,
-      });
+      throw error;
     }
   }
 
-  // ----------------------------------------------------------
-  // 带重试的调用
-  // ----------------------------------------------------------
-
   /**
-   * 带自动重试的聊天请求
-   * @param messages 消息列表
-   * @param config LLM 配置
-   * @param maxRetries 最大重试次数，默认 3
-   * @param retryDelay 重试间隔（毫秒），默认 1000，每次重试指数退避
+   * 带重试的聊天请求
    */
   async chatWithRetry(
     messages: ChatMessage[],
     config?: LLMServiceConfig,
     taskType: TaskType = 'general',
     maxRetries?: number,
-    retryDelay?: number,
   ): Promise<LLMResponse> {
     const retries = maxRetries ?? this.defaultMaxRetries;
-    const baseDelay = retryDelay ?? this.defaultRetryDelay;
-    let lastError: Error | null = null;
+    let lastError: unknown;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         return await this.chat(messages, config, taskType);
       } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
+        lastError = error;
 
-        if (!isRetryableError(error) || attempt >= retries) {
-          throw lastError;
+        if (attempt < retries && isRetryableError(error)) {
+          const delayMs = this.defaultRetryDelay * Math.pow(2, attempt);
+          console.warn(`[LLM] 第 ${attempt + 1} 次重试，等待 ${delayMs}ms...`);
+          await delay(delayMs);
+          continue;
         }
 
-        // 指数退避：1s, 2s, 4s ...
-        const waitTime = baseDelay * Math.pow(2, attempt);
-        console.warn(
-          `[LLM] 第 ${attempt + 1} 次重试，${waitTime}ms 后重试... 错误: ${lastError.message}`,
-        );
-        await delay(waitTime);
+        throw error;
       }
     }
 
-    throw lastError!;
+    throw lastError;
   }
 
   // ----------------------------------------------------------
@@ -361,6 +425,7 @@ export class LLMService {
     config?: LLMServiceConfig,
     taskType: TaskType = 'general',
   ): Promise<string> {
+    this.syncConfigs();
     const resolvedConfig = config ?? this.configManager.get(taskType);
     const url = this.buildUrl(resolvedConfig);
     const body = this.buildRequestBody(messages, resolvedConfig, true);
@@ -412,38 +477,55 @@ export class LLMService {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // 按行解析 SSE 数据
+        // 处理 SSE 格式
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
 
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed === 'data: [DONE]') continue;
-          if (!trimmed.startsWith('data: ')) continue;
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
 
-          try {
-            const json = JSON.parse(trimmed.slice(6));
-            const delta = json.choices?.[0]?.delta?.content;
-            if (delta) {
-              fullContent += delta;
-              options.onToken(delta);
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed.choices?.[0]?.delta?.content ?? '';
+              if (delta) {
+                fullContent += delta;
+                options.onToken(delta);
+              }
+            } catch {
+              // 忽略解析错误
             }
-          } catch {
-            // 忽略无法解析的行
           }
         }
       }
 
-      // 清理 think 标签后返回
+      // 处理最后可能残留的数据
+      if (buffer) {
+        const lines = buffer.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed.choices?.[0]?.delta?.content ?? '';
+              if (delta) {
+                fullContent += delta;
+                options.onToken(delta);
+              }
+            } catch {
+              // 忽略解析错误
+            }
+          }
+        }
+      }
+
       const cleanedContent = cleanThinkTags(fullContent);
       options.onComplete?.(cleanedContent);
       return cleanedContent;
     } catch (error) {
       clearTimeout(timeoutId);
-      if (error instanceof LLMServiceError) {
-        options.onError?.(error);
-        throw error;
-      }
       if (error instanceof DOMException && error.name === 'AbortError') {
         const err = new LLMServiceError({
           code: 'TIMEOUT',
@@ -514,10 +596,11 @@ export class LLMService {
   ): Record<string, unknown> {
     return {
       model: config.model,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      messages,
       max_tokens: config.maxTokens ?? 4096,
       temperature: config.temperature ?? 0.7,
       stream,
+      ...(config.extraHeaders ? {} : {}),
     };
   }
 
@@ -530,7 +613,6 @@ export class LLMService {
       Authorization: `Bearer ${config.apiKey}`,
     };
 
-    // 合并额外请求头
     if (config.extraHeaders) {
       Object.assign(headers, config.extraHeaders);
     }
@@ -539,47 +621,47 @@ export class LLMService {
   }
 
   /**
-   * 从非流式响应中提取文本内容
+   * 提取响应内容
    */
   private extractContent(data: Record<string, unknown>): string {
-    const choices = data.choices as Array<{ message?: { content?: string } }> | undefined;
-    if (choices?.[0]?.message?.content) {
-      return choices[0].message.content;
+    const choices = data.choices as Array<Record<string, unknown>> | undefined;
+    if (!choices || choices.length === 0) {
+      return '';
     }
-    // 某些 API 返回格式不同
-    if (typeof data.content === 'string') {
-      return data.content;
-    }
-    if (typeof data.text === 'string') {
-      return data.text;
-    }
-    return '';
+
+    const message = choices[0].message as Record<string, unknown> | undefined;
+    return (message?.content as string) ?? '';
   }
 
   /**
    * 解析错误响应
    */
-  private async parseErrorResponse(
-    response: Response,
-  ): Promise<{ code?: string; message?: string }> {
+  private async parseErrorResponse(response: Response): Promise<LLMError> {
     try {
       const data = await response.json();
       return {
-        code: data.error?.code ?? data.code,
-        message: data.error?.message ?? data.message ?? data.error,
+        code: data.error?.code ?? `HTTP_${response.status}`,
+        message: data.error?.message ?? response.statusText,
+        statusCode: response.status,
+        retryable: response.status === 429 || response.status >= 500,
       };
     } catch {
-      return { message: response.statusText };
+      return {
+        code: `HTTP_${response.status}`,
+        message: response.statusText,
+        statusCode: response.status,
+        retryable: response.status === 429 || response.status >= 500,
+      };
     }
   }
 }
 
 // ============================================================
-// 导出便捷实例
+// 全局单例
 // ============================================================
 
-/** 全局默认配置管理器 */
-export const globalConfigManager = new LLMConfigManager();
-
-/** 全局默认 LLM 服务实例 */
-export const llmService = new LLMService(globalConfigManager);
+/**
+ * 全局 LLM 服务实例
+ * 应用内统一使用此实例
+ */
+export const llmService = new LLMService();

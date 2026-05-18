@@ -249,6 +249,7 @@ export interface TaskModelAssignment {
   review: string;          // 审查
   finalization: string;    // 定稿
   summary: string;         // 摘要生成
+  [key: string]: string;   // 允许额外的任务类型
 }
 
 // ============================================================================
