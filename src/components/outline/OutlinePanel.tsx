@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Plus,
   Wand2,
@@ -14,7 +15,9 @@ import {
 } from 'lucide-react';
 import Button from '../common/Button';
 import { StructureBadge } from '../common/Badge';
+import { useToast } from '../common/Toast';
 import { useAppState, useAppDispatch, projectActions, editorActions, uiActions } from '../../store';
+import { AIPipeline } from '../../services/aiPipeline';
 import type { Chapter as StoreChapter, ChapterStructureTag, ChapterStatus as StoreChapterStatus } from '../../types';
 
 /** 结构标记类型 */
@@ -85,6 +88,10 @@ const statusLabels: Record<ChapterStatus, string> = {
 const OutlinePanel: React.FC = () => {
   const state = useAppState();
   const dispatch = useAppDispatch();
+  const navigate = useNavigate();
+  const { addToast } = useToast();
+
+  const hasLLMConfig = state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0;
 
   const storeVolumes = state.project.volumes;
   const storeChapters = state.project.chapters;
@@ -124,20 +131,51 @@ const OutlinePanel: React.FC = () => {
 
   const activeVolume = volumes.find((v) => v.id === activeVolumeId);
 
-  const handleGenerateVolume = (volumeId: string) => {
+  const handleGenerateVolume = async (volumeId: string) => {
+    if (!hasLLMConfig) {
+      addToast('warning', '请先在设置中配置 AI 模型');
+      navigate('/settings');
+      return;
+    }
     setGenerating(volumeId);
-    setTimeout(() => {
+    try {
+      const pipeline = new AIPipeline();
+      const vol = storeVolumes.find(v => v.id === volumeId);
+      if (!vol || !state.project.currentProject) return;
+      await pipeline.generateOutline(
+        state.project.currentProject,
+        state.project.characters,
+        [vol],
+      );
+      addToast('success', `${vol.title} 大纲生成完成`);
+    } catch (error) {
+      addToast('error', `大纲生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
       setGenerating(null);
-      // 保留模拟行为，AI 服务接入是另一个任务
-    }, 2000);
+    }
   };
 
-  const handleGenerateAll = () => {
+  const handleGenerateAll = async () => {
+    if (!hasLLMConfig) {
+      addToast('warning', '请先在设置中配置 AI 模型');
+      navigate('/settings');
+      return;
+    }
     setGenerating('all');
-    setTimeout(() => {
+    try {
+      const pipeline = new AIPipeline();
+      if (!state.project.currentProject) return;
+      await pipeline.generateOutline(
+        state.project.currentProject,
+        state.project.characters,
+        storeVolumes,
+      );
+      addToast('success', '全部卷大纲生成完成');
+    } catch (error) {
+      addToast('error', `大纲生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
       setGenerating(null);
-      // 保留模拟行为，AI 服务接入是另一个任务
-    }, 3000);
+    }
   };
 
   const toggleChapter = (chapterId: string) => {
@@ -240,6 +278,8 @@ const OutlinePanel: React.FC = () => {
               icon={<Wand2 size={14} />}
               onClick={() => handleGenerateVolume(activeVolumeId)}
               loading={generating === activeVolumeId}
+              disabled={!hasLLMConfig && generating !== activeVolumeId}
+              title={!hasLLMConfig ? '请先在设置中配置 AI 模型' : undefined}
             >
               生成当前卷
             </Button>
@@ -249,11 +289,25 @@ const OutlinePanel: React.FC = () => {
               icon={<Wand2 size={14} />}
               onClick={handleGenerateAll}
               loading={generating === 'all'}
+              disabled={!hasLLMConfig && generating !== 'all'}
+              title={!hasLLMConfig ? '请先在设置中配置 AI 模型' : undefined}
             >
               生成全部
             </Button>
           </div>
         </div>
+
+        {/* 未配置 AI 模型时的提示 */}
+        {!hasLLMConfig && (
+          <div
+            className="flex items-center gap-2 px-3 py-2 mb-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs cursor-pointer hover:bg-amber-100 transition-colors"
+            onClick={() => navigate('/settings')}
+          >
+            <AlertCircle size={14} className="shrink-0" />
+            <span>请先配置 AI 模型，</span>
+            <span className="font-medium underline">前往设置</span>
+          </div>
+        )}
 
         {/* 卷选择器（标签页） */}
         <div className="flex gap-1">

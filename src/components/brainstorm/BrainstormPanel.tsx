@@ -6,6 +6,7 @@ import {
   Bot,
   User,
   FileText,
+  AlertCircle,
 } from 'lucide-react';
 import Button from '../common/Button';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -130,6 +131,10 @@ const BrainstormPanel: React.FC = () => {
   const [previewContent, setPreviewContent] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const hasLLMConfig = () => {
+    return state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0;
+  };
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -209,6 +214,11 @@ const BrainstormPanel: React.FC = () => {
     const text = inputValue.trim();
     if (!text || isLoading) return;
 
+    if (!hasLLMConfig()) {
+      addToast('warning', '请先配置 AI 模型，灵感收束需要 AI 模型支持。');
+      return;
+    }
+
     addUserMessage(text);
     setInputValue('');
     handleAIResponse(text);
@@ -216,105 +226,54 @@ const BrainstormPanel: React.FC = () => {
 
   const handleOptionClick = (option: string) => {
     if (isLoading) return;
+
+    if (!hasLLMConfig()) {
+      addToast('warning', '请先配置 AI 模型，灵感收束需要 AI 模型支持。');
+      return;
+    }
+
     addUserMessage(option);
     handleAIResponse(option);
   };
 
-  /** 模拟模式：使用 setTimeout 模拟 AI 回复（降级方案） */
-  const simulateAIResponse = (_userInput: string) => {
-    const nextDim = currentDimension + 1;
-
-    if (nextDim < DIMENSIONS.length) {
-      // 还有下一个维度
-      addAIMessage(
-        `很好！关于"${DIMENSIONS[currentDimension]}"的信息已记录。\n\n接下来是第 ${nextDim + 1} 个维度：**${DIMENSIONS[nextDim]}**\n\n请描述你的小说在${DIMENSIONS[nextDim]}方面的设定：`,
-        ['参考经典作品', '我有明确的想法', '需要更多灵感'],
-        DIMENSION_TYPES[nextDim]
-      );
-      setCurrentDimension(nextDim);
-    } else {
-      // 所有维度完成
-      setCompletedDimensions((prev) =>
-        prev.map((_, i) => (i <= currentDimension ? true : false))
-      );
-      const samplePreview = generateSamplePreview();
-      setPreviewContent(samplePreview);
-      setShowPreview(true);
-      addAIMessage(
-        `太棒了！所有 ${DIMENSIONS.length} 个维度的灵感收束已完成。\n\n我已经根据你的描述生成了项目蓝图（project.md）的预览，请查看并确认。`,
-        [],
-        DIMENSION_TYPES[currentDimension]
-      );
-      // 所有维度完成时，切换到 outline 阶段
-      dispatch(projectActions.setStage('outline'));
-      dispatch(projectActions.setStatus('planned'));
-    }
-
-    // 标记当前维度为已完成
-    setCompletedDimensions((prev) => {
-      const next = [...prev];
-      next[currentDimension] = true;
-      return next;
-    });
-  };
-
-  const handleAIResponse = async (userInput: string) => {
+  const handleAIResponse = async (_userInput: string) => {
     setIsLoading(true);
 
     try {
-      // 检查是否有 LLM 配置
-      const hasLLM = state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0;
+      const nextDim = currentDimension + 1;
 
-      if (hasLLM) {
-        // 真实 LLM 调用
-        const nextDim = currentDimension + 1;
+      if (nextDim < DIMENSIONS.length) {
+        // 调用 AI Pipeline 获取下一个维度的问题
+        const history = state.project.brainstormMessages;
+        const aiResponse = await pipeline.brainstormNextQuestion(
+          DIMENSION_TYPES[nextDim],
+          history,
+          state.project.currentProject ?? undefined
+        );
 
-        if (nextDim < DIMENSIONS.length) {
-          // 调用 AI Pipeline 获取下一个维度的问题
-          const history = state.project.brainstormMessages;
-          const aiResponse = await pipeline.brainstormNextQuestion(
-            DIMENSION_TYPES[nextDim],
-            history,
-            state.project.currentProject ?? undefined
-          );
-
-          addAIMessage(aiResponse, undefined, DIMENSION_TYPES[nextDim]);
-          setCurrentDimension(nextDim);
-        } else {
-          // 所有维度完成，调用确认
-          const history = state.project.brainstormMessages;
-          const projectData = await pipeline.brainstormConfirm(history);
-
-          // 生成预览内容
-          const preview = buildPreviewFromProjectData(projectData);
-          setPreviewContent(preview);
-          setShowPreview(true);
-
-          addAIMessage(
-            `太棒了！所有 ${DIMENSIONS.length} 个维度的灵感收束已完成。\n\n我已经根据你的描述生成了项目蓝图（project.md）的预览，请查看并确认。`,
-            [],
-            DIMENSION_TYPES[currentDimension]
-          );
-
-          dispatch(projectActions.setStage('outline'));
-          dispatch(projectActions.setStatus('planned'));
-        }
+        addAIMessage(aiResponse, undefined, DIMENSION_TYPES[nextDim]);
+        setCurrentDimension(nextDim);
       } else {
-        // 无 LLM 配置时使用模拟模式
-        setTimeout(() => {
-          simulateAIResponse(userInput);
-          setIsLoading(false);
-        }, 1500);
-        return; // setTimeout 会处理 setIsLoading(false)
+        // 所有维度完成，调用确认
+        const history = state.project.brainstormMessages;
+        const projectData = await pipeline.brainstormConfirm(history);
+
+        // 生成预览内容
+        const preview = buildPreviewFromProjectData(projectData);
+        setPreviewContent(preview);
+        setShowPreview(true);
+
+        addAIMessage(
+          `太棒了！所有 ${DIMENSIONS.length} 个维度的灵感收束已完成。\n\n我已经根据你的描述生成了项目蓝图（project.md）的预览，请查看并确认。`,
+          [],
+          DIMENSION_TYPES[currentDimension]
+        );
+
+        dispatch(projectActions.setStage('outline'));
+        dispatch(projectActions.setStatus('planned'));
       }
     } catch (error) {
       addToast('error', `AI 调用失败: ${error instanceof Error ? error.message : '未知错误'}`);
-      // 降级为模拟模式
-      setTimeout(() => {
-        simulateAIResponse(userInput);
-        setIsLoading(false);
-      }, 1500);
-      return; // setTimeout 会处理 setIsLoading(false)
     } finally {
       // 标记当前维度为已完成
       setCompletedDimensions((prev) => {
@@ -322,51 +281,8 @@ const BrainstormPanel: React.FC = () => {
         next[currentDimension] = true;
         return next;
       });
-      // 仅在真实 LLM 调用路径时在 finally 中设置 loading
-      const hasLLM = state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0;
-      if (hasLLM) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
-  };
-
-  const generateSamplePreview = () => {
-    return `# 项目蓝图
-
-## 核心概念
-基于灵感收束对话生成的核心概念描述...
-
-## 世界观设定
-- 时代背景：待完善
-- 社会结构：待完善
-- 力量体系：待完善
-
-## 主角人设
-- 姓名：待完善
-- 性格特征：待完善
-- 成长弧线：待完善
-
-## 核心冲突
-- 外部冲突：待完善
-- 内部冲突：待完善
-
-## 情感基调
-整体基调：待完善
-
-## 叙事视角
-视角选择：待完善
-
-## 关键转折
-转折点规划：待完善
-
-## 主题深度
-核心主题：待完善
-
-## 独特卖点
-差异化元素：待完善
-
----
-*由 NovelFlow 灵感收束引擎生成*`;
   };
 
   const handleConfirmPreview = () => {
@@ -386,6 +302,8 @@ const BrainstormPanel: React.FC = () => {
       handleSend();
     }
   };
+
+  const llmDisabled = !hasLLMConfig();
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -493,7 +411,7 @@ const BrainstormPanel: React.FC = () => {
                     <button
                       key={idx}
                       onClick={() => handleOptionClick(option)}
-                      disabled={isLoading}
+                      disabled={isLoading || llmDisabled}
                       className="
                         px-3 py-1.5 rounded-lg text-xs font-medium
                         bg-white border border-slate-200 text-slate-600
@@ -557,31 +475,45 @@ const BrainstormPanel: React.FC = () => {
             </Button>
           </div>
         ) : (
-          <div className="flex items-center gap-3">
-            <div className="flex-1 relative">
-              <textarea
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={`描述你的"${DIMENSIONS[currentDimension]}"...`}
-                rows={2}
-                className="
-                  w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm
-                  resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-                  placeholder:text-slate-400
-                "
-                disabled={isLoading}
-              />
+          <>
+            {!hasLLMConfig() && !showPreview && (
+              <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                <AlertCircle size={20} className="text-amber-500 shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-amber-800">请先配置 AI 模型</p>
+                  <p className="text-xs text-amber-600 mt-0.5">灵感收束需要 AI 模型支持，请前往设置页面配置 API。</p>
+                </div>
+                <Button variant="primary" size="sm" onClick={() => dispatch(uiActions.setView('settings'))}>
+                  前往设置
+                </Button>
+              </div>
+            )}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 relative">
+                <textarea
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={`描述你的"${DIMENSIONS[currentDimension]}"...`}
+                  rows={2}
+                  className="
+                    w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm
+                    resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                    placeholder:text-slate-400
+                  "
+                  disabled={isLoading || llmDisabled}
+                />
+              </div>
+              <Button
+                onClick={handleSend}
+                disabled={!inputValue.trim() || isLoading || llmDisabled}
+                icon={<Send size={16} />}
+                className="shrink-0"
+              >
+                发送
+              </Button>
             </div>
-            <Button
-              onClick={handleSend}
-              disabled={!inputValue.trim() || isLoading}
-              icon={<Send size={16} />}
-              className="shrink-0"
-            >
-              发送
-            </Button>
-          </div>
+          </>
         )}
       </div>
     </div>

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Save,
   Eye,
@@ -16,6 +17,7 @@ import {
   Send,
   Copy,
   Check,
+  AlertCircle,
 } from 'lucide-react';
 import Button from '../common/Button';
 import { useAppState, useAppDispatch, editorActions, projectActions } from '../../store';
@@ -129,6 +131,7 @@ const ChapterEditor: React.FC = () => {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const { addToast } = useToast();
+  const navigate = useNavigate();
 
   const currentChapter = state.editor.currentChapter;
   const editorContent = state.editor.editorContent;
@@ -148,6 +151,10 @@ const ChapterEditor: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const wordCount = countChineseChars(content);
+
+  const hasLLMConfig = () => {
+    return state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0;
+  };
 
   // 同步 store 的 editorContent 到本地 content
   useEffect(() => {
@@ -198,110 +205,78 @@ const ChapterEditor: React.FC = () => {
     setAiOutput('');
   };
 
-  /** 模拟模式：使用 sampleTexts + setInterval 模拟流式输出（降级方案） */
-  const simulateGenerate = () => {
-    const sampleTexts: Record<AIAction, string> = {
-      draft: `夜色如墨，月光透过云层的缝隙洒落在古老的石板路上。\n\n林远站在巷口，目光深邃地望着远处的灯火。他的手指不自觉地摩挲着口袋里那枚冰凉的铜钥匙——这是父亲临终前交给他的唯一遗物。\n\n"你终有一天会找到那扇门。"父亲的声音仿佛还在耳边回响。\n\n他深吸一口气，迈步走进了夜色之中。身后的影子被路灯拉得很长，像是一条通往未知世界的道路。\n\n巷子深处传来若有若无的钟声，那声音不像是来自任何一座教堂，更像是来自地底深处——来自那扇传说中的门。`,
-      review: `## 审查结果\n\n### 整体评价\n章节整体流畅，情节推进合理。\n\n### 发现的问题\n1. **第2段**：人物心理描写可以更深入\n2. **第4段**："像是一条通往未知世界的道路" 比喻略显陈旧\n3. **伏笔检查**：铜钥匙的伏笔已正确埋设\n\n### 建议修改\n- 增加环境感官描写（声音、气味）\n- 强化主角内心的矛盾感`,
-      deai: `处理完成。主要修改：\n1. 调整了部分过于工整的排比句式\n2. 增加了口语化的过渡词\n3. 打破了部分过于对称的段落结构\n4. 添加了一些"不完美"的表达，增加真实感`,
-      expand: `（扩写后的内容将在这里显示...）\n\n夜色如墨，浓稠得几乎能用手掬起。月亮被层层叠叠的乌云遮蔽，只在云层的缝隙间偶尔泄露出一缕惨白的月光，像是谁在深空中划了一道细小的伤口。\n\n林远站在巷口，风裹挟着初秋的凉意拂过他的面颊。他的目光深邃而复杂，穿过层层叠叠的屋顶，落在远处那条灯火通明的长街上。那里有酒馆的喧嚣，有行人的笑语，有属于这个世界的烟火气——而这一切，似乎都与他无关了。\n\n他的手指不自觉地摩挲着口袋里那枚冰凉的铜钥匙。钥匙的表面已经被岁月打磨得光滑，但上面的纹路依然清晰可辨——那是一个他从未见过的符号，像是某种古老的文字，又像是某种神秘的图腾。`,
-      condense: `（缩写后的内容将在这里显示...）\n\n夜色中，林远站在巷口，手握父亲遗留给他的铜钥匙。回忆起父亲临终前的话——"你终有一天会找到那扇门"——他深吸一口气，走进了夜色。巷子深处传来神秘的钟声，仿佛来自地底。`,
-    };
-
-    const fullText = sampleTexts[selectedAction!];
-    let index = 0;
-
-    const streamInterval = setInterval(() => {
-      if (index < fullText.length) {
-        setAiOutput((prev) => prev + fullText[index]);
-        index++;
-      } else {
-        clearInterval(streamInterval);
-        setIsGenerating(false);
-      }
-    }, 30);
-  };
-
   const handleGenerate = async () => {
     if (!selectedAction || isGenerating) return;
     setIsGenerating(true);
     setAiOutput('');
 
     try {
-      const hasLLM = state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0;
+      const onStream: StreamCallback = (token: string) => {
+        setAiOutput((prev) => prev + token);
+      };
 
-      if (hasLLM && currentChapter) {
-        // 真实 LLM 调用
-        const onStream: StreamCallback = (token: string) => {
-          setAiOutput((prev) => prev + token);
-        };
+      switch (selectedAction) {
+        case 'draft': {
+          if (!currentChapter) break;
+          // 找到前一章
+          const chapters = state.project.chapters;
+          const previousChapter = currentChapter.chapterNumber > 1
+            ? chapters.find((c) => c.chapterNumber === currentChapter.chapterNumber - 1) ?? null
+            : null;
 
-        switch (selectedAction) {
-          case 'draft': {
-            // 找到前一章
-            const chapters = state.project.chapters;
-            const previousChapter = currentChapter.chapterNumber > 1
-              ? chapters.find((c) => c.chapterNumber === currentChapter.chapterNumber - 1) ?? null
-              : null;
-
-            await pipeline.generateChapterDraft(
-              currentChapter,
-              {
-                project: state.project.currentProject!,
-                characters: state.project.characters,
-                globalSummary: state.project.globalSummary,
-                previousChapter,
-              },
-              onStream
-            );
-            break;
-          }
-          case 'review': {
-            const chapters = state.project.chapters;
-            const previousChapter = currentChapter.chapterNumber > 1
-              ? chapters.find((c) => c.chapterNumber === currentChapter.chapterNumber - 1) ?? null
-              : null;
-
-            const result = await pipeline.reviewChapter(
-              currentChapter,
-              {
-                project: state.project.currentProject!,
-                characters: state.project.characters,
-                globalSummary: state.project.globalSummary,
-                previousChapter,
-                canonLog: state.project.currentProject?.canonLog ?? [],
-              }
-            );
-            const reviewText = formatReviewResult(result);
-            setAiOutput(reviewText);
-            dispatch(editorActions.setReviewResult(result));
-            break;
-          }
-          case 'deai':
-          case 'expand':
-          case 'condense': {
-            // 这些操作使用自定义 prompt + 流式输出
-            const messages = [
-              { role: 'system' as const, content: '你是一个专业的小说编辑助手。' },
-              { role: 'user' as const, content: `${promptText}\n\n以下是需要处理的文本：\n\n${content}` },
-            ];
-            await llmService.chatStream(
-              messages,
-              { onToken: onStream },
-              undefined,
-              'draft'
-            );
-            break;
-          }
+          await pipeline.generateChapterDraft(
+            currentChapter,
+            {
+              project: state.project.currentProject!,
+              characters: state.project.characters,
+              globalSummary: state.project.globalSummary,
+              previousChapter,
+            },
+            onStream
+          );
+          break;
         }
-      } else {
-        // 无 LLM 配置时使用模拟模式
-        simulateGenerate();
+        case 'review': {
+          if (!currentChapter) break;
+          const chapters = state.project.chapters;
+          const previousChapter = currentChapter.chapterNumber > 1
+            ? chapters.find((c) => c.chapterNumber === currentChapter.chapterNumber - 1) ?? null
+            : null;
+
+          const result = await pipeline.reviewChapter(
+            currentChapter,
+            {
+              project: state.project.currentProject!,
+              characters: state.project.characters,
+              globalSummary: state.project.globalSummary,
+              previousChapter,
+              canonLog: state.project.currentProject?.canonLog ?? [],
+            }
+          );
+          const reviewText = formatReviewResult(result);
+          setAiOutput(reviewText);
+          dispatch(editorActions.setReviewResult(result));
+          break;
+        }
+        case 'deai':
+        case 'expand':
+        case 'condense': {
+          // 这些操作使用自定义 prompt + 流式输出
+          const messages = [
+            { role: 'system' as const, content: '你是一个专业的小说编辑助手。' },
+            { role: 'user' as const, content: `${promptText}\n\n以下是需要处理的文本：\n\n${content}` },
+          ];
+          await llmService.chatStream(
+            messages,
+            { onToken: onStream },
+            undefined,
+            'draft'
+          );
+          break;
+        }
       }
     } catch (error) {
       addToast('error', `AI 调用失败: ${error instanceof Error ? error.message : '未知错误'}`);
-      // 降级为模拟模式
-      simulateGenerate();
     } finally {
       setIsGenerating(false);
     }
@@ -458,12 +433,15 @@ const ChapterEditor: React.FC = () => {
                   <button
                     key={action.key}
                     onClick={() => handleSelectAction(action.key)}
+                    disabled={!hasLLMConfig()}
                     className={`
                       w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm transition-colors
                       ${
-                        selectedAction === action.key
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'text-slate-600 hover:bg-slate-100'
+                        !hasLLMConfig()
+                          ? 'opacity-50 cursor-not-allowed text-slate-400'
+                          : selectedAction === action.key
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'text-slate-600 hover:bg-slate-100'
                       }
                     `}
                   >
@@ -500,6 +478,7 @@ const ChapterEditor: React.FC = () => {
                   className="w-full mt-2"
                   onClick={handleGenerate}
                   loading={isGenerating}
+                  disabled={!hasLLMConfig()}
                   icon={<Send size={14} />}
                 >
                   {isGenerating ? '生成中...' : '开始生成'}
@@ -509,7 +488,16 @@ const ChapterEditor: React.FC = () => {
 
             {/* AI输出区域 */}
             <div className="flex-1 overflow-y-auto p-3">
-              {aiOutput ? (
+              {!hasLLMConfig() ? (
+                <div className="flex flex-col items-center justify-center h-full text-center px-4">
+                  <AlertCircle size={32} className="text-amber-400 mb-3" />
+                  <p className="text-sm font-medium text-slate-600 mb-1">请先配置 AI 模型</p>
+                  <p className="text-xs text-slate-400 mb-4">AI 助手功能需要配置 LLM API 才能使用</p>
+                  <Button variant="primary" size="sm" onClick={() => navigate('/settings')}>
+                    前往设置
+                  </Button>
+                </div>
+              ) : aiOutput ? (
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-medium text-slate-500">输出结果</span>
