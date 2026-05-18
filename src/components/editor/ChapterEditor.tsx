@@ -243,7 +243,9 @@ const ChapterEditor: React.FC = () => {
             ? chapters.find((c) => c.chapterNumber === currentChapter.chapterNumber - 1) ?? null
             : null;
 
-          const result = await pipeline.reviewChapter(
+          // 流式审查
+          let reviewContent = '';
+          const result = await pipeline.reviewChapterStream(
             currentChapter,
             {
               project: state.project.currentProject!,
@@ -251,8 +253,13 @@ const ChapterEditor: React.FC = () => {
               globalSummary: state.project.globalSummary,
               previousChapter,
               canonLog: state.project.currentProject?.canonLog ?? [],
+            },
+            (token) => {
+              reviewContent += token;
+              setAiOutput(reviewContent);
             }
           );
+          // 最终格式化显示
           const reviewText = formatReviewResult(result);
           setAiOutput(reviewText);
           dispatch(editorActions.setReviewResult(result));

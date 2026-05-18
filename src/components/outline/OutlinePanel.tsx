@@ -44,6 +44,8 @@ interface Volume {
   chapters: Chapter[];
 }
 
+
+
 /** store ChapterStatus -> 组件 ChapterStatus 映射 */
 function mapChapterStatus(status: StoreChapterStatus): ChapterStatus {
   switch (status) {
@@ -124,6 +126,7 @@ const OutlinePanel: React.FC = () => {
   const [expandedChapterId, setExpandedChapterId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [generating, setGenerating] = useState<string | null>(null);
+  const [streamOutputs, setStreamOutputs] = useState<Record<string, string>>({});
 
   // 编辑模式下的临时编辑状态
   const [editTask, setEditTask] = useState('');
@@ -138,14 +141,23 @@ const OutlinePanel: React.FC = () => {
       return;
     }
     setGenerating(volumeId);
+    setStreamOutputs(prev => ({ ...prev, [volumeId]: '' }));
     try {
       const pipeline = new AIPipeline();
       const vol = storeVolumes.find(v => v.id === volumeId);
       if (!vol || !state.project.currentProject) return;
-      await pipeline.generateOutline(
+      
+      // 流式生成大纲
+      await pipeline.generateOutlineStream(
         state.project.currentProject,
         state.project.characters,
         [vol],
+        (token) => {
+          setStreamOutputs(prev => ({
+            ...prev,
+            [volumeId]: (prev[volumeId] || '') + token
+          }));
+        }
       );
       addToast('success', `${vol.title} 大纲生成完成`);
     } catch (error) {
@@ -162,13 +174,22 @@ const OutlinePanel: React.FC = () => {
       return;
     }
     setGenerating('all');
+    setStreamOutputs(prev => ({ ...prev, all: '' }));
     try {
       const pipeline = new AIPipeline();
       if (!state.project.currentProject) return;
-      await pipeline.generateOutline(
+      
+      // 流式生成所有大纲
+      await pipeline.generateOutlineStream(
         state.project.currentProject,
         state.project.characters,
         storeVolumes,
+        (token) => {
+          setStreamOutputs(prev => ({
+            ...prev,
+            all: (prev.all || '') + token
+          }));
+        }
       );
       addToast('success', '全部卷大纲生成完成');
     } catch (error) {
@@ -306,6 +327,26 @@ const OutlinePanel: React.FC = () => {
             <AlertCircle size={14} className="shrink-0" />
             <span>请先配置 AI 模型，</span>
             <span className="font-medium underline">前往设置</span>
+          </div>
+        )}
+
+        {/* 流式输出生成的大纲内容 */}
+        {(streamOutputs[activeVolumeId] || streamOutputs.all) && (
+          <div className="mb-4 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+            <div className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-2">
+              <Wand2 size={14} />
+              <span>AI 正在生成大纲...</span>
+              {generating && (
+                <span className="inline-flex items-center">
+                  <span className="animate-pulse">●</span>
+                  <span className="animate-pulse delay-100">●</span>
+                  <span className="animate-pulse delay-200">●</span>
+                </span>
+              )}
+            </div>
+            <div className="text-sm text-slate-700 whitespace-pre-wrap font-mono max-h-60 overflow-y-auto">
+              {streamOutputs[activeVolumeId] || streamOutputs.all}
+            </div>
           </div>
         )}
 

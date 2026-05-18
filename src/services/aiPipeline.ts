@@ -303,17 +303,19 @@ export class AIPipeline {
   // ============================================================
 
   /**
-   * 根据项目设定、角色和卷信息，生成卷大纲
+   * 根据项目设定、角色和卷信息，生成卷大纲（流式版本）
    *
    * @param project 小说项目
    * @param characters 角色列表
    * @param volumes 卷列表
+   * @param onStream 流式回调函数
    * @returns 大纲生成结果
    */
-  async generateOutline(
+  async generateOutlineStream(
     project: NovelProject,
     characters: Character[],
     volumes: Volume[],
+    onStream?: StreamCallback,
   ): Promise<OutlineResult> {
     // 构建项目方案文本
     const projectContent = this.buildProjectContent(project);
@@ -346,13 +348,56 @@ export class AIPipeline {
       { role: 'user', content: userPrompt },
     ];
 
-    const response = await this.llm.chat(messages, undefined, 'outline');
+    // 如果有流式回调，使用流式接口
+    if (onStream) {
+      let fullContent = '';
+      await this.llm.chatStream(
+        messages,
+        {
+          onToken: (token) => {
+            fullContent += token;
+            onStream(token);
+          },
+          onComplete: (content) => {
+            fullContent = content;
+          },
+          onError: (error) => {
+            throw error;
+          },
+        },
+        undefined,
+        'outline',
+      );
+      return {
+        content: fullContent,
+        model: 'streaming',
+        totalTokens: 0,
+      };
+    }
 
+    // 非流式版本
+    const response = await this.llm.chat(messages, undefined, 'outline');
     return {
       content: response.content,
       model: response.model,
       totalTokens: response.totalTokens,
     };
+  }
+
+  /**
+   * 根据项目设定、角色和卷信息，生成卷大纲（非流式版本，兼容旧代码）
+   *
+   * @param project 小说项目
+   * @param characters 角色列表
+   * @param volumes 卷列表
+   * @returns 大纲生成结果
+   */
+  async generateOutline(
+    project: NovelProject,
+    characters: Character[],
+    volumes: Volume[],
+  ): Promise<OutlineResult> {
+    return this.generateOutlineStream(project, characters, volumes);
   }
 
   // ============================================================
@@ -453,13 +498,14 @@ export class AIPipeline {
   // ============================================================
 
   /**
-   * 对章节进行综合审查
+   * 对章节进行综合审查（流式版本）
    *
    * @param chapter 待审查的章节
    * @param context 上下文信息
+   * @param onStream 流式回调函数
    * @returns 审查结果
    */
-  async reviewChapter(
+  async reviewChapterStream(
     chapter: Chapter,
     context: {
       project: NovelProject;
@@ -468,6 +514,7 @@ export class AIPipeline {
       previousChapter: Chapter | null;
       canonLog: CanonEntry[];
     },
+    onStream?: StreamCallback,
   ): Promise<PipelineReviewResult> {
     const { project, characters, previousChapter, canonLog } = context;
 
@@ -490,6 +537,38 @@ export class AIPipeline {
       { role: 'user', content: `请审查以下章节内容：\n\n${chapter.draftContent}\n\n${userPrompt}` },
     ];
 
+    // 如果有流式回调，使用流式接口
+    if (onStream) {
+      let fullContent = '';
+      await this.llm.chatStream(
+        messages,
+        {
+          onToken: (token) => {
+            fullContent += token;
+            onStream(token);
+          },
+          onComplete: (content) => {
+            fullContent = content;
+          },
+          onError: (error) => {
+            throw error;
+          },
+        },
+        undefined,
+        'review',
+      );
+
+      // 解析审查结果
+      const parsedResult = this.parseReviewResult(fullContent, chapter.chapterNumber);
+
+      return {
+        ...parsedResult,
+        model: 'streaming',
+        totalTokens: 0,
+      };
+    }
+
+    // 非流式版本
     const response = await this.llm.chat(messages, undefined, 'review');
 
     // 解析审查结果
@@ -500,6 +579,26 @@ export class AIPipeline {
       model: response.model,
       totalTokens: response.totalTokens,
     };
+  }
+
+  /**
+   * 对章节进行综合审查（非流式版本，兼容旧代码）
+   *
+   * @param chapter 待审查的章节
+   * @param context 上下文信息
+   * @returns 审查结果
+   */
+  async reviewChapter(
+    chapter: Chapter,
+    context: {
+      project: NovelProject;
+      characters: Character[];
+      globalSummary: GlobalSummary | null;
+      previousChapter: Chapter | null;
+      canonLog: CanonEntry[];
+    },
+  ): Promise<PipelineReviewResult> {
+    return this.reviewChapterStream(chapter, context);
   }
 
   // ============================================================
