@@ -46,6 +46,7 @@ export interface NovelProject {
   currentChapter: number;
   blockedReason?: string;
   lastSkill?: string;
+  storagePath?: string;        // 项目文件存储路径（本地文件系统）
   createdAt: string;
   updatedAt: string;
 

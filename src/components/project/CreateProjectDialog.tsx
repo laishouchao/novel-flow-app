@@ -3,7 +3,9 @@ import Dialog from '../common/Dialog';
 import Button from '../common/Button';
 import { useAppState, useAppDispatch, projectActions, uiActions } from '../../store';
 import { generateId } from '../../utils/id';
+import { selectProjectFolder } from '../../services/fileService';
 import type { NovelProject, NovelStyle, PresetStyle } from '../../types';
+import { Folder } from 'lucide-react';
 
 export interface ProjectFormData {
   name: string;
@@ -101,6 +103,8 @@ const CreateProjectDialog: React.FC = () => {
   });
 
   const [customStyle, setCustomStyle] = useState('');
+  const [storagePath, setStoragePath] = useState('');
+  const [selectingFolder, setSelectingFolder] = useState(false);
 
   const updateField = <K extends keyof ProjectFormData>(
     key: K,
@@ -121,6 +125,19 @@ const CreateProjectDialog: React.FC = () => {
       chapterWordCount: 2300,
     });
     setCustomStyle('');
+    setStoragePath('');
+  };
+
+  const handleSelectFolder = async () => {
+    setSelectingFolder(true);
+    try {
+      const folder = await selectProjectFolder();
+      if (folder) {
+        setStoragePath(folder);
+      }
+    } finally {
+      setSelectingFolder(false);
+    }
   };
 
   const handleSubmit = () => {
@@ -144,6 +161,7 @@ const CreateProjectDialog: React.FC = () => {
       stage: 'brainstorm',
       currentVolume: 1,
       currentChapter: 0,
+      storagePath: storagePath || undefined,
       createdAt: now,
       updatedAt: now,
       canonLog: [],
@@ -163,6 +181,7 @@ const CreateProjectDialog: React.FC = () => {
       chapterWordCount: 2300,
     });
     setCustomStyle('');
+    setStoragePath('');
   };
 
   const isValid = formData.name.trim().length > 0;
@@ -216,6 +235,39 @@ const CreateProjectDialog: React.FC = () => {
                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
                        placeholder:text-slate-400"
           />
+        </div>
+
+        {/* 存储位置 */}
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            存储位置
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={storagePath}
+              onChange={(e) => setStoragePath(e.target.value)}
+              placeholder="选择项目文件保存位置（可选）"
+              className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-sm
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                         placeholder:text-slate-400"
+              readOnly
+            />
+            <button
+              type="button"
+              onClick={handleSelectFolder}
+              disabled={selectingFolder}
+              className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-600
+                         hover:bg-slate-50 hover:border-slate-400 transition-colors
+                         flex items-center gap-1.5"
+            >
+              <Folder size={14} />
+              {selectingFolder ? '选择中...' : '选择文件夹'}
+            </button>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            {storagePath ? `项目将保存到: ${storagePath}` : '不选择则仅保存在浏览器本地存储中'}
+          </p>
         </div>
 
         {/* 题材选择 */}

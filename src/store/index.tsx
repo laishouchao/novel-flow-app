@@ -5,7 +5,7 @@
 // 包含 ProjectState / EditorState / AIState / UIState 四大状态域
 // ============================================================================
 
-import { createContext, useContext, useReducer, useState, useEffect, type Dispatch, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useState, useEffect, useRef, type Dispatch, type ReactNode } from 'react';
 import type {
   NovelProject,
   Chapter,
@@ -34,6 +34,7 @@ import type {
   ProxySetting,
 } from '../types';
 import { generateNotificationId } from '../utils/id';
+import { saveProjectToDisk } from '../services/fileService';
 
 // ============================================================================
 // 状态定义
@@ -961,6 +962,51 @@ export function AppProvider({ children }: AppProviderProps) {
     }, 500);
     return () => clearTimeout(timer);
   }, [state, dispatch]);
+
+  // Debounced save to disk（仅当项目有 storagePath 时）
+  const diskSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const project = state.project.currentProject;
+    if (!project?.storagePath) return;
+
+    // 清除之前的定时器
+    if (diskSaveTimerRef.current) {
+      clearTimeout(diskSaveTimerRef.current);
+    }
+
+    diskSaveTimerRef.current = setTimeout(async () => {
+      try {
+        await saveProjectToDisk(project.storagePath!, {
+          project,
+          volumes: state.project.volumes,
+          chapters: state.project.chapters,
+          characters: state.project.characters,
+          brainstormMessages: state.project.brainstormMessages,
+          globalSummary: state.project.globalSummary,
+        });
+        console.log('[Store] 项目已保存到磁盘:', project.storagePath);
+      } catch (e) {
+        console.error('[Store] 保存到磁盘失败:', e);
+        dispatch({
+          domain: 'ui',
+          action: {
+            type: 'UI_ADD_NOTIFICATION',
+            payload: {
+              type: 'error',
+              title: '磁盘保存失败',
+              message: `无法保存项目到磁盘: ${e instanceof Error ? e.message : '未知错误'}`,
+            },
+          },
+        });
+      }
+    }, 2000); // 磁盘保存延迟更长（2秒），减少 IO 频率
+
+    return () => {
+      if (diskSaveTimerRef.current) {
+        clearTimeout(diskSaveTimerRef.current);
+      }
+    };
+  }, [state.project, state.editor.isDirty]);
 
   return (
     <AppStateContext.Provider value={state}>

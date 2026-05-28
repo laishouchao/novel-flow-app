@@ -11,7 +11,7 @@ import {
   Sparkles,
   Settings,
 } from 'lucide-react';
-import { useAppState } from '../../store';
+import { useAppState, useAppDispatch, editorActions, uiActions } from '../../store';
 
 interface FileItem {
   id: string;
@@ -28,6 +28,7 @@ interface ProjectFilePanelProps {
 
 const ProjectFilePanel: React.FC<ProjectFilePanelProps> = ({ isOpen, onToggle }) => {
   const state = useAppState();
+  const dispatch = useAppDispatch();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['prompts', 'chapters']));
 
   const currentProject = state.project.currentProject;
@@ -130,6 +131,20 @@ const ProjectFilePanel: React.FC<ProjectFilePanelProps> = ({ isOpen, onToggle })
     });
   };
 
+  /** 点击文件时：如果是章节文件则在编辑器中打开 */
+  const handleFileClick = (item: FileItem) => {
+    if (item.type === 'folder') {
+      toggleFolder(item.id);
+      return;
+    }
+    // 查找是否是章节文件
+    const chapter = state.project.chapters.find(ch => ch.id === item.id);
+    if (chapter) {
+      dispatch(editorActions.setChapter(chapter));
+      dispatch(uiActions.setView('editor'));
+    }
+  };
+
   const getFileIcon = (type: FileItem['type']) => {
     switch (type) {
       case 'folder':
@@ -156,10 +171,10 @@ const ProjectFilePanel: React.FC<ProjectFilePanelProps> = ({ isOpen, onToggle })
             className={`
               flex items-center gap-2 py-1.5 px-3 text-sm cursor-pointer
               hover:bg-slate-100 transition-colors
-              ${item.type === 'folder' ? 'font-medium text-slate-700' : 'text-slate-600'}
+              ${item.type === 'folder' ? 'font-medium text-slate-700' : 'text-slate-600 hover:text-blue-600'}
             `}
             style={{ paddingLeft }}
-            onClick={() => item.type === 'folder' && toggleFolder(item.id)}
+            onClick={() => handleFileClick(item)}
           >
             {item.type === 'folder' && (
               <span className="text-slate-400">
@@ -230,6 +245,11 @@ const ProjectFilePanel: React.FC<ProjectFilePanelProps> = ({ isOpen, onToggle })
             <p className="mt-1">
               {state.project.chapters.filter(ch => ch.projectId === currentProject.id).length} 章节
             </p>
+            {currentProject.storagePath && (
+              <p className="mt-1 truncate text-slate-400" title={currentProject.storagePath}>
+                📁 {currentProject.storagePath}
+              </p>
+            )}
           </div>
         </div>
       )}
