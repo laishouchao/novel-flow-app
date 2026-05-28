@@ -76,6 +76,10 @@ export interface NovelProject {
 
   // ---- 情节线管理 ----
   storylines?: Storyline[];
+
+  // ---- 角色与关系（运行时同步，用于 reducer 同步 currentProject） ----
+  characters?: Character[];
+  relations?: CharacterRelation[];
 }
 
 // ============================================================================

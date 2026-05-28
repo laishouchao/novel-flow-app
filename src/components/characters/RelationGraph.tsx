@@ -66,8 +66,12 @@ function useForceGraph(
   height: number
 ) {
   const nodesRef = useRef<GraphNode[]>([]);
+  const linksRef = useRef<GraphLink[]>([]);
   const animRef = useRef<number>(0);
   const [tick, setTick] = useState(0);
+
+  // 始终保持 linksRef 为最新值，避免 effect 闭包读到过期的 links
+  linksRef.current = links;
 
   useEffect(() => {
     // 初始化节点位置
@@ -111,7 +115,7 @@ function useForceGraph(
 
       // 吸引力（相连节点）
       const nodeMap = new Map(ns.map(n => [n.id, n]));
-      for (const link of links) {
+      for (const link of linksRef.current) {
         const s = nodeMap.get(link.source);
         const t = nodeMap.get(link.target);
         if (!s || !t) continue;
@@ -528,7 +532,7 @@ export default function RelationGraph({ onNodeClick }: { onNodeClick?: (characte
     ctx.scale(dpr, dpr);
 
     drawGraph(ctx, simNodes, graphLinks, hoveredNode, canvasSize.width, canvasSize.height);
-  }, [viewMode, simNodes, graphLinks, hoveredNode, canvasSize, simNodes.length > 0 ? simNodes[0].x : 0]);
+  }, [viewMode, simNodes, graphLinks, hoveredNode, canvasSize]);
 
   // Canvas 鼠标交互
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -572,7 +576,8 @@ export default function RelationGraph({ onNodeClick }: { onNodeClick?: (characte
   // 操作
   const handleSaveRelation = useCallback((rel: CharacterRelation) => {
     if (editingRelation) {
-      dispatch(projectActions.updateRelation(rel.id, rel));
+      const { id, ...updates } = rel;
+      dispatch(projectActions.updateRelation(id, updates));
     } else {
       dispatch(projectActions.addRelation(rel));
     }

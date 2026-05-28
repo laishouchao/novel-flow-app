@@ -372,11 +372,12 @@ const BrainstormPanel: React.FC = () => {
 
   const handleConfirmPreview = () => {
     if (confirmedProjectData) {
-      const updateData: Record<string, unknown> = { ...confirmedProjectData };
-      updateData.coreSeed = (confirmedProjectData.coreSeed as string) ?? previewContent;
-      updateData.status = 'planned';
-      updateData.stage = 'outline';
-      dispatch(projectActions.update(updateData as Partial<import('../../types').NovelProject>));
+      dispatch(projectActions.update({
+        ...confirmedProjectData,
+        coreSeed: (confirmedProjectData.coreSeed as string) ?? previewContent,
+        status: 'planned',
+        stage: 'outline',
+      }));
     } else {
       dispatch(projectActions.update({ coreSeed: previewContent, status: 'planned', stage: 'outline' }));
     }

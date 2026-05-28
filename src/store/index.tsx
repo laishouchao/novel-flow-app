@@ -305,22 +305,21 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
 
     case 'PROJECT_SET_CURRENT': {
       // 切换项目时，重置所有项目关联状态，防止旧项目数据污染新项目
+      // 注意：volumes/chapters/characters/relations 等是独立的顶层状态字段，
+      // 不在 NovelProject 接口上。openProject() 会从磁盘加载后通过 SET_LIST action 填充。
       const isNewProject = state.currentProject?.id !== action.payload.id;
-      const proj = action.payload as NovelProject & Record<string, unknown>;
       return {
         ...state,
         currentProject: action.payload,
         loading: false,
         error: null,
-        // 仅在切换到不同项目时重置关联状态
-        // 但如果项目对象上已有数据（从 PROJECT_UPDATE 存储的），则恢复而非清空
         ...(isNewProject ? {
-          volumes: Array.isArray(proj.volumes) ? proj.volumes as Volume[] : [],
-          chapters: Array.isArray(proj.chapters) ? proj.chapters as Chapter[] : [],
-          characters: Array.isArray(proj.characters) ? proj.characters as Character[] : [],
-          relations: Array.isArray(proj.relations) ? proj.relations as CharacterRelation[] : [],
-          globalSummary: (proj.globalSummary as GlobalSummary) ?? null,
-          brainstormMessages: Array.isArray(proj.brainstormMessages) ? proj.brainstormMessages as BrainstormMessage[] : [],
+          volumes: [],
+          chapters: [],
+          characters: [],
+          relations: [],
+          globalSummary: null,
+          brainstormMessages: [],
         } : {}),
       };
     }
@@ -505,57 +504,109 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
     case 'CHARACTER_SET_LIST':
       return { ...state, characters: action.payload };
 
-    case 'CHARACTER_ADD':
-      return { ...state, characters: [...state.characters, action.payload] };
-
-    case 'CHARACTER_UPDATE':
+    case 'CHARACTER_ADD': {
+      const newChars = [...state.characters, action.payload];
       return {
         ...state,
-        characters: state.characters.map((ch) =>
-          ch.id === action.payload.id ? { ...ch, ...action.payload.updates } : ch
-        ),
+        characters: newChars,
+        currentProject: state.currentProject
+          ? { ...state.currentProject, characters: newChars }
+          : state.currentProject,
       };
+    }
 
-    case 'CHARACTER_DELETE':
-      return { ...state, characters: state.characters.filter((ch) => ch.id !== action.payload) };
-
-    case 'CHARACTER_UPDATE_STATE':
+    case 'CHARACTER_UPDATE': {
+      const updatedChars = state.characters.map((ch) =>
+        ch.id === action.payload.id ? { ...ch, ...action.payload.updates } : ch
+      );
       return {
         ...state,
-        characters: state.characters.map((ch) =>
-          ch.id === action.payload.id
-            ? { ...ch, currentState: action.payload.state }
-            : ch
-        ),
+        characters: updatedChars,
+        currentProject: state.currentProject
+          ? { ...state.currentProject, characters: updatedChars }
+          : state.currentProject,
       };
+    }
 
-    case 'CHARACTER_ADD_CHANGE':
+    case 'CHARACTER_DELETE': {
+      const filteredChars = state.characters.filter((ch) => ch.id !== action.payload);
       return {
         ...state,
-        characters: state.characters.map((ch) =>
-          ch.id === action.payload.characterId
-            ? { ...ch, changeLog: [...ch.changeLog, action.payload.change] }
-            : ch
-        ),
+        characters: filteredChars,
+        currentProject: state.currentProject
+          ? { ...state.currentProject, characters: filteredChars }
+          : state.currentProject,
       };
+    }
+
+    case 'CHARACTER_UPDATE_STATE': {
+      const stateChars = state.characters.map((ch) =>
+        ch.id === action.payload.id
+          ? { ...ch, currentState: action.payload.state }
+          : ch
+      );
+      return {
+        ...state,
+        characters: stateChars,
+        currentProject: state.currentProject
+          ? { ...state.currentProject, characters: stateChars }
+          : state.currentProject,
+      };
+    }
+
+    case 'CHARACTER_ADD_CHANGE': {
+      const changeChars = state.characters.map((ch) =>
+        ch.id === action.payload.characterId
+          ? { ...ch, changeLog: [...ch.changeLog, action.payload.change] }
+          : ch
+      );
+      return {
+        ...state,
+        characters: changeChars,
+        currentProject: state.currentProject
+          ? { ...state.currentProject, characters: changeChars }
+          : state.currentProject,
+      };
+    }
 
     // ---- 关系 ----
     case 'RELATION_SET_LIST':
       return { ...state, relations: action.payload };
 
-    case 'RELATION_ADD':
-      return { ...state, relations: [...state.relations, action.payload] };
-
-    case 'RELATION_UPDATE':
+    case 'RELATION_ADD': {
+      const newRels = [...state.relations, action.payload];
       return {
         ...state,
-        relations: state.relations.map((r) =>
-          r.id === action.payload.id ? { ...r, ...action.payload.updates } : r
-        ),
+        relations: newRels,
+        currentProject: state.currentProject
+          ? { ...state.currentProject, relations: newRels }
+          : state.currentProject,
       };
+    }
 
-    case 'RELATION_DELETE':
-      return { ...state, relations: state.relations.filter((r) => r.id !== action.payload) };
+    case 'RELATION_UPDATE': {
+      const updatedRels = state.relations.map((r) =>
+        r.id === action.payload.id ? { ...r, ...action.payload.updates } : r
+      );
+      return {
+        ...state,
+        relations: updatedRels,
+        currentProject: state.currentProject
+          ? { ...state.currentProject, relations: updatedRels }
+          : state.currentProject,
+      };
+    }
+
+    case 'RELATION_DELETE': {
+      const filteredRels = state.relations.filter((r) => r.id !== action.payload);
+      return {
+        ...state,
+        relations: filteredRels,
+        currentProject: state.currentProject
+          ? { ...state.currentProject, relations: filteredRels }
+          : state.currentProject,
+      };
+    }
 
     // ---- Canon ----
     case 'CANON_ADD_ENTRY': {
@@ -900,42 +951,28 @@ function loadState(): Partial<AppState> | null {
   }
 }
 
+/**
+ * 从 localStorage 保存状态。
+ * 注意：章节正文已通过 fileService 持久化到磁盘，localStorage 仅保存元数据。
+ * 这避免了大型小说项目超出 ~5MB localStorage 配额。
+ * editor 状态（isDirty, lastSavedAt 等）是临时的，不持久化。
+ */
 function saveState(state: AppState): { success: boolean; error?: string } {
   try {
+    // 排除章节正文内容，仅保留元数据（标题、字数统计等）
+    const chaptersMeta = state.project.chapters.map((ch) => ({
+      ...ch,
+      draftContent: '', // 正文已保存到磁盘，不重复存到 localStorage
+      finalContent: '',
+    }));
     const toSave = {
-      project: state.project,
+      project: { ...state.project, chapters: chaptersMeta },
       ai: state.ai,
       ui: { editorPrefs: state.ui.editorPrefs },
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
     return { success: true };
   } catch (error) {
-    const isQuotaError =
-      error instanceof DOMException &&
-      (error.code === 22 || error.code === 1014 || error.name === 'QuotaExceededError');
-
-    if (isQuotaError) {
-      // 尝试精简数据后重新保存：移除章节草稿内容以节省空间
-      try {
-        const trimmedProject = {
-          ...state.project,
-          chapters: state.project.chapters.map((ch) => ({
-            ...ch,
-            draftContent: ch.draftContent ? ch.draftContent.slice(0, 200) + '...[已截断]' : '',
-          })),
-        };
-        const toSave = {
-          project: trimmedProject,
-          ai: state.ai,
-          ui: { editorPrefs: state.ui.editorPrefs },
-        };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-        return { success: true, error: 'STORAGE_TRIMMED' };
-      } catch {
-        // 精简后仍然失败
-      }
-    }
-
     console.error('[Store] 保存状态到 localStorage 失败:', error);
     return { success: false, error: 'STORAGE_FULL' };
   }
