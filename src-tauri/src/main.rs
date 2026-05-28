@@ -9,13 +9,13 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-/// 全局共享的 HTTP 客户端，带 120 秒超时配置
-/// 使用 OnceLock 确保只初始化一次，避免每次请求创建新客户端
+/// 全局共享的 HTTP 客户端
+/// 不设置全局绝对超时（避免流式请求被误杀），只设置连接超时
+/// 非流式请求通过 per-request timeout 控制
 fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
             .connect_timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to create HTTP client")
@@ -28,6 +28,10 @@ pub struct HttpRequest {
     pub method: String,
     pub headers: HashMap<String, String>,
     pub body: Option<String>,
+    /// 可选的请求超时时间（秒），仅用于非流式请求
+    /// 流式请求不设超时，由前端管理生命周期
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,6 +63,10 @@ async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     };
     
     let mut req_builder = client.request(method, &request.url);
+    
+    // 非流式请求：应用 per-request 超时（默认 300 秒）
+    let timeout_secs = request.timeout_secs.unwrap_or(300);
+    req_builder = req_builder.timeout(Duration::from_secs(timeout_secs));
     
     for (key, value) in &request.headers {
         req_builder = req_builder.header(key, value);

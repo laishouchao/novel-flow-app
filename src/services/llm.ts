@@ -31,7 +31,7 @@ export interface LLMServiceConfig {
   maxTokens?: number;
   /** 温度参数，默认 0.7 */
   temperature?: number;
-  /** 超时时间（毫秒），默认 60000 */
+  /** 超时时间（毫秒），默认 300000（5分钟）。大纲生成等长任务可能需要较长时间 */
   timeout?: number;
   /** HTTP 代理地址，例如 http://127.0.0.1:7890 */
   proxyUrl?: string;
@@ -357,6 +357,10 @@ export class LLMService {
 
     try {
       // 使用 Tauri 命令发送 HTTP 请求，绕过 CORS 限制
+      // 将前端配置的超时（毫秒）转换为秒传给后端，默认 300 秒
+      const timeoutSecs = resolvedConfig.timeout
+        ? Math.ceil(resolvedConfig.timeout / 1000)
+        : 300;
       const response = await invoke<{
         status: number;
         status_text: string;
@@ -368,6 +372,7 @@ export class LLMService {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
+          timeout_secs: timeoutSecs,
         },
       });
 
@@ -604,7 +609,7 @@ export class LLMService {
     const headers = this.buildHeaders(config);
 
     try {
-      // 使用 Tauri 命令发送 HTTP 请求
+      // 使用 Tauri 命令发送 HTTP 请求，连接测试使用 15 秒超时
       const response = await invoke<{
         status: number;
         status_text: string;
@@ -616,6 +621,7 @@ export class LLMService {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
+          timeout_secs: 15,
         },
       });
 

@@ -46,6 +46,7 @@ interface LocalLLMConfig {
   model: string;
   temperature: number;
   maxTokens: number;
+  timeout?: number;
 }
 
 interface StylePreset {
@@ -127,6 +128,7 @@ function storeToLocal(storeConfig: StoreLLMConfig): LocalLLMConfig {
     model: storeConfig.model,
     temperature: storeConfig.temperature,
     maxTokens: storeConfig.maxTokens,
+    timeout: storeConfig.timeout,
   };
 }
 
@@ -141,7 +143,7 @@ function localToStore(localConfig: LocalLLMConfig): StoreLLMConfig {
     model: localConfig.model,
     maxTokens: localConfig.maxTokens,
     temperature: localConfig.temperature,
-    timeout: 60000,
+    timeout: localConfig.timeout ?? 300000,
   };
 }
 
