@@ -8,11 +8,14 @@ import {
   Sparkles,
   Users,
   Globe,
+  BookMarked,
+  FileCode,
+  Download,
 } from 'lucide-react';
 import { StepProgressBar } from '../common/ProgressBar';
 import { ProjectStatusBadge } from '../common/Badge';
 
-type NavItem = 'writing' | 'projects' | 'characters' | 'world' | 'settings';
+type NavItem = 'writing' | 'projects' | 'characters' | 'world' | 'outline-tools' | 'prompts' | 'export' | 'settings';
 
 interface SidebarProps {
   currentNav?: NavItem;
@@ -32,6 +35,9 @@ const navItems: { key: NavItem; label: string; icon: React.ReactNode }[] = [
   { key: 'projects', label: '项目管理', icon: <FolderKanban size={20} /> },
   { key: 'characters', label: '角色管理', icon: <Users size={20} /> },
   { key: 'world', label: '世界观', icon: <Globe size={20} /> },
+  { key: 'outline-tools', label: '大纲工具', icon: <BookMarked size={20} /> },
+  { key: 'prompts', label: '提示词', icon: <FileCode size={20} /> },
+  { key: 'export', label: '导出', icon: <Download size={20} /> },
   { key: 'settings', label: '设置', icon: <Settings size={20} /> },
 ];
 

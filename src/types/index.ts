@@ -175,6 +175,33 @@ export interface WorldFaction {
 }
 
 // ============================================================================
+// 伏笔与情节线
+// ============================================================================
+
+/** 伏笔 */
+export interface Foreshadowing {
+  id: string;
+  content: string;
+  type: string;                     // 伏笔类型（character/plot/worldview/item/emotion/mystery/symbol/foreshadow/callback/other）
+  plantedChapter: string;           // 埋设章节
+  resolvedChapter: string;          // 收束章节
+  status: 'planted' | 'echoed' | 'resolved' | 'abandoned';
+}
+
+/** 情节线阶段 */
+export type StorylinePhase = 'introduction' | 'development' | 'complication' | 'climax' | 'resolution';
+
+/** 情节线 */
+export interface Storyline {
+  id: string;
+  name: string;
+  description: string;
+  currentPhase: StorylinePhase;
+  isMainPlot: boolean;
+  progress: number;                 // 0-1 进度
+}
+
+// ============================================================================
 // 卷
 // ============================================================================
 
