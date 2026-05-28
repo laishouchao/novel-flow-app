@@ -128,6 +128,18 @@ const ChapterEditor: React.FC = () => {
   const editorContent = state.editor.editorContent;
   const storeViewMode = state.editor.viewMode;
 
+  // 自动选中第一个章节（如果当前没有选中任何章节）
+  useEffect(() => {
+    if (!currentChapter && state.project.chapters.length > 0) {
+      const firstChapter = state.project.chapters
+        .slice()
+        .sort((a, b) => a.chapterNumber - b.chapterNumber)[0];
+      if (firstChapter) {
+        dispatch(editorActions.setChapter(firstChapter));
+      }
+    }
+  }, [currentChapter, state.project.chapters, dispatch]);
+
   const chapterTitle = currentChapter?.title ?? '未选择章节';
   const initialContent = editorContent;
 
@@ -359,6 +371,31 @@ const ChapterEditor: React.FC = () => {
     setContent(newContent);
     dispatch(editorActions.setContent(newContent));
   };
+
+  // 无章节时显示引导页面
+  if (!currentChapter && state.project.chapters.length === 0) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center bg-white dark:bg-slate-900">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-50 dark:bg-amber-900/30 flex items-center justify-center">
+            <Pencil size={28} className="text-amber-500" />
+          </div>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-2">
+            还没有章节
+          </h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+            请先在"大纲规划"中创建章节，或使用 AI 生成章节大纲后再开始写作。
+          </p>
+          <Button
+            variant="primary"
+            onClick={() => dispatch(uiActions.setView('outline'))}
+          >
+            前往大纲规划
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-white dark:bg-slate-900">
