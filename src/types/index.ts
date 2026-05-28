@@ -132,6 +132,34 @@ export interface CharacterChange {
 }
 
 // ============================================================================
+// 角色关系
+// ============================================================================
+
+/** 关系类型 */
+export type RelationType =
+  | 'family'       // 家人
+  | 'lover'        // 恋人
+  | 'friend'       // 朋友
+  | 'enemy'        // 敌人
+  | 'mentor'       // 师徒
+  | 'superior'     // 上下级
+  | 'ally'         // 盟友
+  | 'rival'        // 宿敌
+  | 'colleague'    // 同门/同事
+  | 'other';       // 其他
+
+/** 角色关系 */
+export interface CharacterRelation {
+  id: string;
+  fromCharacterId: string;
+  toCharacterId: string;
+  relationType: RelationType;
+  label: string;            // 关系描述标签
+  description?: string;     // 详细描述
+  isBidirectional: boolean; // 是否双向关系
+}
+
+// ============================================================================
 // 卷
 // ============================================================================
 

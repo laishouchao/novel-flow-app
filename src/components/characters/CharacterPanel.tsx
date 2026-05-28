@@ -16,12 +16,14 @@ import {
   Tag,
   ChevronDown,
   ChevronUp,
+  Link2,
 } from 'lucide-react';
 import { useAppState, useAppDispatch, projectActions } from '../../store';
 import type { Character, CharacterRole, CharacterState } from '../../types';
 import { generateCharacterId } from '../../utils/id';
 import Button from '../common/Button';
 import Dialog from '../common/Dialog';
+import RelationGraph from './RelationGraph';
 
 // ============================================================================
 // 角色配置
@@ -738,6 +740,7 @@ export default function CharacterPanel() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<CharacterRole | 'all'>('all');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [rightView, setRightView] = useState<'characters' | 'relations'>('characters');
 
   // 筛选和排序
   const filteredCharacters = useMemo(() => {
@@ -897,7 +900,16 @@ export default function CharacterPanel() {
         </div>
 
         {/* 创建按钮 */}
-        <div className="px-3 py-3 border-t border-slate-200">
+        <div className="px-3 py-3 border-t border-slate-200 space-y-2">
+          <Button
+            variant={rightView === 'relations' ? 'secondary' : 'primary'}
+            size="sm"
+            className="w-full"
+            icon={<Link2 size={14} />}
+            onClick={() => setRightView(rightView === 'relations' ? 'characters' : 'relations')}
+          >
+            {rightView === 'relations' ? '返回角色' : '关系图谱'}
+          </Button>
           <Button
             variant="primary"
             size="sm"
@@ -912,7 +924,9 @@ export default function CharacterPanel() {
 
       {/* 右侧详情 */}
       <div className="flex-1 bg-slate-50 overflow-hidden">
-        {editing && editChar ? (
+        {rightView === 'relations' ? (
+          <RelationGraph />
+        ) : editing && editChar ? (
           <div className="h-full bg-white">
             <CharacterForm
               character={editChar}

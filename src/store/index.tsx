@@ -11,6 +11,7 @@ import type {
   Chapter,
   Volume,
   Character,
+  CharacterRelation,
   BrainstormMessage,
   AppConfig,
   ReviewResult,
@@ -52,6 +53,8 @@ export interface ProjectState {
   chapters: Chapter[];
   /** 当前项目的角色列表 */
   characters: Character[];
+  /** 当前项目的角色关系列表 */
+  relations: CharacterRelation[];
   /** 全局摘要 */
   globalSummary: GlobalSummary | null;
   /** 灵感收束对话历史 */
@@ -163,6 +166,10 @@ export type ProjectAction =
   | { type: 'CHARACTER_DELETE'; payload: string }
   | { type: 'CHARACTER_UPDATE_STATE'; payload: { id: string; state: CharacterState } }
   | { type: 'CHARACTER_ADD_CHANGE'; payload: { characterId: string; change: CharacterChange } }
+  | { type: 'RELATION_SET_LIST'; payload: CharacterRelation[] }
+  | { type: 'RELATION_ADD'; payload: CharacterRelation }
+  | { type: 'RELATION_UPDATE'; payload: { id: string; updates: Partial<CharacterRelation> } }
+  | { type: 'RELATION_DELETE'; payload: string }
   | { type: 'CANON_ADD_ENTRY'; payload: CanonEntry }
   | { type: 'GLOBAL_SUMMARY_SET'; payload: GlobalSummary }
   | { type: 'BRAINSTORM_ADD_MESSAGE'; payload: BrainstormMessage }
@@ -237,6 +244,7 @@ const initialProjectState: ProjectState = {
   volumes: [],
   chapters: [],
   characters: [],
+  relations: [],
   globalSummary: null,
   brainstormMessages: [],
   loading: false,
@@ -310,6 +318,7 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
           volumes: Array.isArray(proj.volumes) ? proj.volumes as Volume[] : [],
           chapters: Array.isArray(proj.chapters) ? proj.chapters as Chapter[] : [],
           characters: Array.isArray(proj.characters) ? proj.characters as Character[] : [],
+          relations: Array.isArray(proj.relations) ? proj.relations as CharacterRelation[] : [],
           globalSummary: (proj.globalSummary as GlobalSummary) ?? null,
           brainstormMessages: Array.isArray(proj.brainstormMessages) ? proj.brainstormMessages as BrainstormMessage[] : [],
         } : {}),
@@ -323,6 +332,7 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
         volumes: [],
         chapters: [],
         characters: [],
+        relations: [],
         globalSummary: null,
         brainstormMessages: [],
       };
@@ -527,6 +537,24 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
             : ch
         ),
       };
+
+    // ---- 关系 ----
+    case 'RELATION_SET_LIST':
+      return { ...state, relations: action.payload };
+
+    case 'RELATION_ADD':
+      return { ...state, relations: [...state.relations, action.payload] };
+
+    case 'RELATION_UPDATE':
+      return {
+        ...state,
+        relations: state.relations.map((r) =>
+          r.id === action.payload.id ? { ...r, ...action.payload.updates } : r
+        ),
+      };
+
+    case 'RELATION_DELETE':
+      return { ...state, relations: state.relations.filter((r) => r.id !== action.payload) };
 
     // ---- Canon ----
     case 'CANON_ADD_ENTRY': {
@@ -1157,6 +1185,14 @@ export const projectActions = {
     domainAction('project', { type: 'CHARACTER_UPDATE_STATE', payload: { id, state } }),
   addCharacterChange: (characterId: string, change: CharacterChange) =>
     domainAction('project', { type: 'CHARACTER_ADD_CHANGE', payload: { characterId, change } }),
+  setRelations: (relations: CharacterRelation[]) =>
+    domainAction('project', { type: 'RELATION_SET_LIST', payload: relations }),
+  addRelation: (relation: CharacterRelation) =>
+    domainAction('project', { type: 'RELATION_ADD', payload: relation }),
+  updateRelation: (id: string, updates: Partial<CharacterRelation>) =>
+    domainAction('project', { type: 'RELATION_UPDATE', payload: { id, updates } }),
+  deleteRelation: (id: string) =>
+    domainAction('project', { type: 'RELATION_DELETE', payload: id }),
   addCanonEntry: (entry: CanonEntry) =>
     domainAction('project', { type: 'CANON_ADD_ENTRY', payload: entry }),
   setGlobalSummary: (summary: GlobalSummary) =>
