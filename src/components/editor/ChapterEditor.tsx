@@ -21,7 +21,7 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import Button from '../common/Button';
-import { useAppState, useAppDispatch, editorActions, projectActions, uiActions } from '../../store';
+import { useAppState, useAppDispatch, editorActions, projectActions } from '../../store';
 import { useToast } from '../common/Toast';
 import { aiPipeline, type StreamCallback } from '../../services/aiPipeline';
 import { llmService } from '../../services/llm';
@@ -388,7 +388,10 @@ const ChapterEditor: React.FC = () => {
           </p>
           <Button
             variant="primary"
-            onClick={() => dispatch(uiActions.setView('outline'))}
+            onClick={() => {
+              dispatch(projectActions.setStage('outline'));
+              dispatch({ domain: 'ui', action: { type: 'UI_SET_VIEW', payload: 'brainstorm' } });
+            }}
           >
             前往大纲规划
           </Button>
