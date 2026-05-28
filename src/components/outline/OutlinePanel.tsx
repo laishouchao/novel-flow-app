@@ -24,6 +24,87 @@ import type { Chapter as StoreChapter, ChapterStructureTag, ChapterStatus as Sto
 /** 结构标记类型 */
 type StructureType = 'setup' | 'build' | 'climax' | 'fallout';
 
+/**
+ * 从AI生成的文本中解析章节信息
+ * 支持多种AI输出格式：## 第一章、**第一章**、- 第一章、第一章：、Chapter 1 等
+ */
+function parseChaptersFromContent(content: string): { title: string; task: string }[] {
+  const lines = content.split('\n');
+  const chapters: { title: string; task: string }[] = [];
+  
+  // 定义章节匹配模式（按优先级排列）
+  const chapterPatterns = [
+    // ## 第一章 标题 / ### 第1章 标题
+    /^#{1,4}\s*第[一二三四五六七八九十百千\d壹贰叁肆伍陆柒捌玖拾佰仟]+章[：:、.\-\s]*(.*)/,
+    // **第一章 标题** / *第一章 标题*
+    /^\*{1,2}\s*第[一二三四五六七八九十百千\d壹贰叁肆伍陆柒捌玖拾佰仟]+章[：:、.\-\s]*(.*?)\s*\**/,
+    // - 第一章 标题 / 1. 第一章 标题
+    /^[-*•]\s*第[一二三四五六七八九十百千\d壹贰叁肆伍陆柒捌玖拾佰仟]+章[：:、.\-\s]*(.*)/,
+    /^\d+[.、)]\s*第[一二三四五六七八九十百千\d壹贰叁肆伍陆柒捌玖拾佰仟]+章[：:、.\-\s]*(.*)/,
+    // 第一章：标题 / 第一章 标题（最基础的格式）
+    /^第[一二三四五六七八九十百千\d壹贰叁肆伍陆柒捌玖拾佰仟]+章[：:、.\-\s]+(.+)/,
+    // Chapter 1: Title / chapter 1 标题
+    /^[Cc]hapter\s*\d+[：:、.\-\s]+(.+)/,
+    // 纯数字编号章节：1. 标题 / 1、标题（至少要有一定长度的标题）
+    /^\d+[.、)]\s+(.{4,})/,
+  ];
+  
+  let currentChapter: { title: string; taskLines: string[] } | null = null;
+  
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    
+    // 去除 markdown 粗体标记用于匹配
+    const cleanLine = line.replace(/\*{1,2}/g, '').trim();
+    
+    let matched = false;
+    for (const pattern of chapterPatterns) {
+      const match = cleanLine.match(pattern);
+      if (match) {
+        // 保存上一个章节
+        if (currentChapter) {
+          chapters.push({
+            title: currentChapter.title,
+            task: currentChapter.taskLines.join('\n').trim(),
+          });
+        }
+        // 提取标题：使用匹配到的内容，或从原始行中提取
+        let title = match[1]?.trim() || '';
+        if (!title) {
+          // 从原始行中去除章节标记作为标题
+          title = cleanLine
+            .replace(/^#{1,4}\s*/, '')
+            .replace(/^第[一二三四五六七八九十百千\d壹贰叁肆伍陆柒捌玖拾佰仟]+章[：:、.\-\s]*/, '')
+            .replace(/^\*{1,2}/, '').replace(/\*{1,2}$/, '')
+            .trim();
+        }
+        currentChapter = {
+          title: title || `第${chapters.length + 1}章`,
+          taskLines: [line],
+        };
+        matched = true;
+        break;
+      }
+    }
+    
+    if (!matched && currentChapter) {
+      // 非章节标题行，追加到当前章节的描述中
+      currentChapter.taskLines.push(line);
+    }
+  }
+  
+  // 保存最后一个章节
+  if (currentChapter) {
+    chapters.push({
+      title: currentChapter.title,
+      task: currentChapter.taskLines.join('\n').trim(),
+    });
+  }
+  
+  return chapters;
+}
+
 /** 章节状态 */
 type ChapterStatus = 'planned' | 'drafted' | 'reviewed' | 'revised' | 'done';
 
@@ -173,27 +254,25 @@ const OutlinePanel: React.FC = () => {
       );
       
       // 解析大纲内容并保存到 store
-      // 尝试从生成的内容中提取章节信息
-      const chapterLines = result.content.split('\n').filter(line => 
-        line.match(/^第[一二三四五六七八九十百千\d]+章/)
-      );
+      // 增强解析：支持多种AI输出格式（## 第一章、**第一章**、- 第一章、第一章：等）
+      const parsedChapters = parseChaptersFromContent(result.content);
       
-      if (chapterLines.length > 0) {
+      if (parsedChapters.length > 0) {
         // 删除该卷已有的章节
         const existingChapters = storeChapters.filter(ch => ch.volumeNumber === vol.volumeNumber);
         for (const ch of existingChapters) {
           dispatch(projectActions.deleteChapter(ch.id));
         }
         // 创建新章节
-        chapterLines.forEach((line, index) => {
+        parsedChapters.forEach((ch, index) => {
           const chapter: import('../../types').Chapter = {
             id: `ch-${Date.now()}-${index}`,
             projectId: currentProject.id,
             volumeId: vol.id,
             volumeNumber: vol.volumeNumber,
             chapterNumber: index + 1,
-            title: line.replace(/^第[一二三四五六七八九十百千\d]+章[：:\s]*/, '').trim() || `第${index + 1}章`,
-            task: line,
+            title: ch.title || `第${index + 1}章`,
+            task: ch.task || ch.title,
             structureTag: 'setup',
             status: 'pending',
             reviewRound: 0,
@@ -212,9 +291,41 @@ const OutlinePanel: React.FC = () => {
           };
           dispatch(projectActions.addChapter(chapter));
         });
+        addToast('success', `${vol.title} 大纲生成完成，已保存 ${parsedChapters.length} 个章节`);
+      } else {
+        // 无法解析章节时，将整个大纲内容保存为一个临时章节，避免内容丢失
+        const fallbackChapter: import('../../types').Chapter = {
+          id: `ch-${Date.now()}-fallback`,
+          projectId: currentProject.id,
+          volumeId: vol.id,
+          volumeNumber: vol.volumeNumber,
+          chapterNumber: 1,
+          title: `${vol.title} 大纲草稿`,
+          task: result.content,
+          structureTag: 'setup',
+          status: 'pending',
+          reviewRound: 0,
+          canonChanged: false,
+          draftContent: '',
+          finalContent: '',
+          wordCount: 0,
+          suspenseLevel: 0,
+          plotTwistLevel: 0,
+          foreshadowing: '',
+          summary: '',
+          reviewNotes: '',
+          finalSummary: '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        // 删除该卷已有的章节
+        const existingChapters = storeChapters.filter(ch => ch.volumeNumber === vol.volumeNumber);
+        for (const ch of existingChapters) {
+          dispatch(projectActions.deleteChapter(ch.id));
+        }
+        dispatch(projectActions.addChapter(fallbackChapter));
+        addToast('warning', `${vol.title} 大纲生成完成，但未能自动拆分章节，已保存为草稿`);
       }
-      
-      addToast('success', `${vol.title} 大纲生成完成，已保存 ${chapterLines.length} 个章节`);
     } catch (error) {
       addToast('error', `大纲生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
     } finally {
@@ -264,68 +375,62 @@ const OutlinePanel: React.FC = () => {
       );
       
       // 解析大纲内容并保存到 store
-      const chapterLines = result.content.split('\n').filter(line => 
-        line.match(/^第[一二三四五六七八九十百千\d]+章/)
-      );
+      const parsedChapters = parseChaptersFromContent(result.content);
       
-      if (chapterLines.length > 0) {
+      if (parsedChapters.length > 0) {
         // 删除所有已有的章节
         for (const ch of storeChapters) {
           dispatch(projectActions.deleteChapter(ch.id));
         }
 
-        // 尝试按卷标记分组（支持"第一卷"、"卷一"、"卷1"等格式）
-        const volumeChapterMap = new Map<number, string[]>();
+        // 尝试按卷标记分组
+        const volumeChapterMap = new Map<number, { title: string; task: string }[]>();
         let currentVolIndex = 0;
 
-        for (const line of chapterLines) {
-          // 检查是否有卷标记（如 "第一卷"、"卷一"、"卷1"、"## 第一卷" 等）
-          const volMatch = line.match(/第[一二三四五六七八九十百千\d]+卷|卷[一二三四五六七八九十百千\d]+|卷\s*\d+/);
+        for (const ch of parsedChapters) {
+          // 检查是否有卷标记
+          const volMatch = ch.title.match(/第[一二三四五六七八九十百千\d]+卷|卷[一二三四五六七八九十百千\d]+|卷\s*\d+/);
           if (volMatch) {
-            // 尝试匹配到已有的卷
             const matchedVol = storeVolumes.find((v, idx) => {
               const volTitle = v.title || `第${idx + 1}卷`;
-              return line.includes(volTitle) || line.includes(`第${v.volumeNumber}卷`);
+              return ch.title.includes(volTitle) || ch.title.includes(`第${v.volumeNumber}卷`);
             });
             if (matchedVol) {
               currentVolIndex = storeVolumes.findIndex(v => v.id === matchedVol.id);
-            } else {
-              // 按顺序递增
-              currentVolIndex = Math.min(currentVolIndex, storeVolumes.length - 1);
             }
           }
           if (!volumeChapterMap.has(currentVolIndex)) {
             volumeChapterMap.set(currentVolIndex, []);
           }
-          volumeChapterMap.get(currentVolIndex)!.push(line);
+          volumeChapterMap.get(currentVolIndex)!.push(ch);
         }
 
-        // 如果只分配到了一个卷（没有卷标记），则按卷数均分
+        // 如果只分配到了一个卷，则按章节数均分
         if (volumeChapterMap.size <= 1 && storeVolumes.length > 1) {
           volumeChapterMap.clear();
-          const perVol = Math.ceil(chapterLines.length / storeVolumes.length);
+          const perVol = Math.ceil(parsedChapters.length / storeVolumes.length);
           storeVolumes.forEach((_, idx) => {
             const start = idx * perVol;
-            const end = Math.min(start + perVol, chapterLines.length);
-            if (start < chapterLines.length) {
-              volumeChapterMap.set(idx, chapterLines.slice(start, end));
+            const end = Math.min(start + perVol, parsedChapters.length);
+            if (start < parsedChapters.length) {
+              volumeChapterMap.set(idx, parsedChapters.slice(start, end));
             }
           });
         }
 
         // 创建新章节
-        for (const [volIdx, volLines] of volumeChapterMap) {
+        for (const [volIdx, volChapters] of volumeChapterMap) {
           const vol = storeVolumes[volIdx];
           if (!vol) continue;
-          volLines.forEach((line, idx) => {
+          volChapters.forEach((ch, idx) => {
             const chapter: import('../../types').Chapter = {
               id: `ch-${Date.now()}-${volIdx}-${idx}`,
               projectId: currentProject.id,
               volumeId: vol.id,
               volumeNumber: vol.volumeNumber,
               chapterNumber: idx + 1,
-              title: line.replace(/^第[一二三四五六七八九十百千\d]+章[：:\s]*/, '').trim() || `第${idx + 1}章`,
-              task: line,
+              title: ch.title || `第${idx + 1}章`,
+              task: ch.task || ch.title,
               structureTag: 'setup',
               status: 'pending',
               reviewRound: 0,
@@ -345,9 +450,10 @@ const OutlinePanel: React.FC = () => {
             dispatch(projectActions.addChapter(chapter));
           });
         }
+        addToast('success', `全部卷大纲生成完成，已保存 ${parsedChapters.length} 个章节`);
+      } else {
+        addToast('warning', '大纲生成完成，但未能自动拆分章节，请检查输出格式');
       }
-      
-      addToast('success', `全部卷大纲生成完成，已保存 ${chapterLines.length} 个章节`);
     } catch (error) {
       addToast('error', `大纲生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
     } finally {

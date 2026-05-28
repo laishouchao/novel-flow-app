@@ -69,9 +69,10 @@ const ProjectList: React.FC = () => {
   const handleOpen = (project: Project) => {
     const novelProject = state.project.projects.find((p) => p.id === project.id);
     if (novelProject) {
-      // 切换项目时重置编辑器状态，避免显示其他项目的内容
+      // 切换项目时重置编辑器和UI状态，避免显示其他项目的内容
       dispatch(editorActions.setContent(''));
       dispatch(editorActions.setChapter(null));
+      dispatch(uiActions.setView('home'));
       dispatch(projectActions.setCurrent(novelProject));
       navigate('/');
     }

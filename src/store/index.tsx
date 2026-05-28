@@ -292,8 +292,24 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
     case 'PROJECT_SET_LIST':
       return { ...state, projects: action.payload, loading: false, error: null };
 
-    case 'PROJECT_SET_CURRENT':
-      return { ...state, currentProject: action.payload, loading: false, error: null };
+    case 'PROJECT_SET_CURRENT': {
+      // 切换项目时，重置所有项目关联状态，防止旧项目数据污染新项目
+      const isNewProject = state.currentProject?.id !== action.payload.id;
+      return {
+        ...state,
+        currentProject: action.payload,
+        loading: false,
+        error: null,
+        // 仅在切换到不同项目时重置关联状态
+        ...(isNewProject ? {
+          volumes: [],
+          chapters: [],
+          characters: [],
+          globalSummary: null,
+          brainstormMessages: [],
+        } : {}),
+      };
+    }
 
     case 'PROJECT_CLEAR_CURRENT':
       return {
@@ -311,6 +327,12 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
         ...state,
         projects: [...state.projects, action.payload],
         currentProject: action.payload,
+        // 创建新项目时重置所有关联状态
+        volumes: [],
+        chapters: [],
+        characters: [],
+        globalSummary: null,
+        brainstormMessages: [],
       };
 
     case 'PROJECT_UPDATE': {

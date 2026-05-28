@@ -61,19 +61,23 @@ function WritingDesk() {
 
   // 根据项目状态自动路由到对应面板
   const renderMainPanel = () => {
-    // 用户手动切换视图时优先显示
+    // 编辑器和审查视图始终优先
     if (currentView === 'editor') return <ChapterEditor />;
     if (currentView === 'review') return <ReviewPanel />;
+
+    // 大纲阶段优先于 brainstorm 视图（防止 brainstorm 完成后残留旧视图）
+    if (projectStage === 'outline' || projectStatus === 'planned') {
+      return <OutlinePanel />;
+    }
+
+    // 用户手动切换的 brainstorm 视图
     if (currentView === 'brainstorm') return <BrainstormPanel />;
 
     // 根据状态机自动路由
     if (projectStatus === 'idea' && projectStage === 'brainstorm') {
       return <BrainstormPanel />;
     }
-    if (projectStatus === 'idea' && (projectStage === 'outline' || !projectStage)) {
-      return <OutlinePanel />;
-    }
-    if (projectStatus === 'planned') {
+    if (projectStatus === 'idea' && !projectStage) {
       return <OutlinePanel />;
     }
     if (projectStatus === 'drafting') {

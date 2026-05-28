@@ -151,6 +151,7 @@ const CreateProjectDialog: React.FC = () => {
 
     dispatch(projectActions.add(project));
     dispatch(uiActions.closeDialog());
+    dispatch(uiActions.setView('home'));
 
     // 重置表单
     setFormData({
