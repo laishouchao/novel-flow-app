@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AppProvider, useAppState, useAppDispatch, uiActions, selectWritingProgress } from './store';
 import type { ProjectStage } from './types';
@@ -19,6 +19,16 @@ import OutlineToolsPanel from './components/outline/OutlineToolsPanel';
 import PromptManagerPanel from './components/settings/PromptManagerPanel';
 import ExportPanel from './components/export/ExportPanel';
 import { ToastProvider } from './components/common/Toast';
+import {
+  PenLine,
+  BookOpen,
+  Users,
+  Globe,
+  BookMarked,
+  Search,
+  FileCode,
+  Download,
+} from 'lucide-react';
 
 // ============================================================================
 // 辅助函数
@@ -36,20 +46,35 @@ function getStepFromStage(stage?: ProjectStage): number {
   }
 }
 
-/** 将路由路径映射为 Sidebar 导航项 */
-function navFromPath(pathname: string): 'writing' | 'projects' | 'characters' | 'world' | 'outline-tools' | 'prompts' | 'export' | 'settings' {
-  if (pathname.startsWith('/project')) return 'projects';
-  if (pathname.startsWith('/characters')) return 'characters';
-  if (pathname.startsWith('/world')) return 'world';
-  if (pathname.startsWith('/outline-tools')) return 'outline-tools';
-  if (pathname.startsWith('/prompts')) return 'prompts';
-  if (pathname.startsWith('/export')) return 'export';
-  if (pathname.startsWith('/settings')) return 'settings';
-  return 'writing';
-}
+// ============================================================================
+// 写作台内部 Tab 定义（项目级功能）
+// ============================================================================
+
+type WritingTab =
+  | 'brainstorm'
+  | 'outline'
+  | 'editor'
+  | 'review'
+  | 'characters'
+  | 'world'
+  | 'outline-tools'
+  | 'prompts'
+  | 'export';
+
+const WRITING_TABS: { key: WritingTab; label: string; icon: React.ReactNode }[] = [
+  { key: 'brainstorm', label: '灵感', icon: <PenLine size={14} /> },
+  { key: 'outline', label: '大纲', icon: <BookOpen size={14} /> },
+  { key: 'editor', label: '写作', icon: <PenLine size={14} /> },
+  { key: 'review', label: '审查', icon: <Search size={14} /> },
+  { key: 'characters', label: '角色', icon: <Users size={14} /> },
+  { key: 'world', label: '世界观', icon: <Globe size={14} /> },
+  { key: 'outline-tools', label: '伏笔/情节线', icon: <BookMarked size={14} /> },
+  { key: 'prompts', label: '提示词', icon: <FileCode size={14} /> },
+  { key: 'export', label: '导出', icon: <Download size={14} /> },
+];
 
 // ============================================================================
-// 写作工作台 - 根据项目状态显示不同面板
+// 写作工作台 - 顶部 Tab + 内容面板
 // ============================================================================
 
 function WritingDesk() {
@@ -59,7 +84,31 @@ function WritingDesk() {
   const projectStatus = state.project.currentProject?.status;
   const projectStage = state.project.currentProject?.stage;
 
-  // 缓存总字数计算，避免每次渲染都重新计算
+  // 根据项目状态决定默认 Tab
+  const getDefaultTab = (): WritingTab => {
+    if (currentView === 'editor') return 'editor';
+    if (currentView === 'review') return 'review';
+    if (currentView === 'brainstorm') return 'brainstorm';
+    if (projectStage === 'outline' || projectStatus === 'planned') return 'outline';
+    if (projectStatus === 'idea' && projectStage === 'brainstorm') return 'brainstorm';
+    if (projectStatus === 'drafting') return 'editor';
+    if (projectStatus === 'reviewing') return 'review';
+    return 'editor';
+  };
+
+  const [activeTab, setActiveTab] = useState<WritingTab>(getDefaultTab);
+
+  // 当项目状态变化时，自动切换到对应 Tab（仅在初始/状态切换时）
+  useEffect(() => {
+    const defaultTab = getDefaultTab();
+    // 只在当前 tab 是默认的工作流 tab 时自动切换（不覆盖用户手动选择的辅助 tab）
+    const workflowTabs: WritingTab[] = ['brainstorm', 'outline', 'editor', 'review'];
+    if (workflowTabs.includes(activeTab)) {
+      setActiveTab(defaultTab);
+    }
+  }, [projectStage, projectStatus, currentView]);
+
+  // 缓存总字数计算
   const totalWordCount = useMemo(
     () => state.project.chapters.reduce((sum, c) => sum + c.wordCount, 0),
     [state.project.chapters]
@@ -70,47 +119,49 @@ function WritingDesk() {
     return <Navigate to="/project" replace />;
   }
 
-  // 根据项目状态自动路由到对应面板
-  const renderMainPanel = () => {
-    // 编辑器和审查视图始终优先
-    if (currentView === 'editor') return <ChapterEditor />;
-    if (currentView === 'review') return <ReviewPanel />;
-
-    // 大纲阶段优先于 brainstorm 视图（防止 brainstorm 完成后残留旧视图）
-    if (projectStage === 'outline' || projectStatus === 'planned') {
-      return <OutlinePanel />;
+  // 渲染当前 Tab 对应的面板
+  const renderPanel = () => {
+    switch (activeTab) {
+      case 'brainstorm': return <BrainstormPanel />;
+      case 'outline': return <OutlinePanel />;
+      case 'editor': return <ChapterEditor />;
+      case 'review': return <ReviewPanel />;
+      case 'characters': return <CharacterPanel />;
+      case 'world': return <WorldbuildingPanel />;
+      case 'outline-tools': return <OutlineToolsPanel />;
+      case 'prompts': return <PromptManagerPanel />;
+      case 'export': return <ExportPanel />;
+      default: return <ChapterEditor />;
     }
-
-    // 用户手动切换的 brainstorm 视图
-    if (currentView === 'brainstorm') return <BrainstormPanel />;
-
-    // 根据状态机自动路由
-    if (projectStatus === 'idea' && projectStage === 'brainstorm') {
-      return <BrainstormPanel />;
-    }
-    if (projectStatus === 'idea' && !projectStage) {
-      return <OutlinePanel />;
-    }
-    if (projectStatus === 'drafting') {
-      return <ChapterEditor />;
-    }
-    if (projectStatus === 'reviewing') {
-      return <ReviewPanel />;
-    }
-    if (projectStatus === 'done') {
-      return <ChapterEditor />;
-    }
-    if (projectStatus === 'blocked') {
-      return <OutlinePanel />;
-    }
-
-    // 默认显示编辑器
-    return <ChapterEditor />;
   };
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-hidden">{renderMainPanel()}</div>
+      {/* 顶部 Tab 栏 */}
+      <div className="flex items-center border-b border-slate-200 bg-white px-2 shrink-0 overflow-x-auto">
+        {WRITING_TABS.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`
+              flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap
+              border-b-2 transition-colors
+              ${activeTab === tab.key
+                ? 'border-blue-600 text-blue-700 bg-blue-50/50'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+              }
+            `}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 内容区域 */}
+      <div className="flex-1 overflow-hidden">{renderPanel()}</div>
+
+      {/* 底部状态栏 */}
       <StatusBar
         projectName={state.project.currentProject.name}
         volumeIndex={state.project.currentProject.currentVolume}
@@ -155,76 +206,6 @@ function SettingsPage() {
 }
 
 // ============================================================================
-// 角色管理页面
-// ============================================================================
-
-function CharactersPage() {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-hidden">
-        <CharacterPanel />
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// 世界观设定页面
-// ============================================================================
-
-function WorldPage() {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-hidden">
-        <WorldbuildingPanel />
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// 大纲工具页面
-// ============================================================================
-
-function OutlineToolsPage() {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-hidden">
-        <OutlineToolsPanel />
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// 提示词管理页面
-// ============================================================================
-
-function PromptsPage() {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-hidden">
-        <PromptManagerPanel />
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// 导出页面
-// ============================================================================
-
-function ExportPage() {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-hidden">
-        <ExportPanel />
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
 // 主应用布局
 // ============================================================================
 
@@ -262,21 +243,18 @@ function AppLayout() {
     });
   }, [state.ai.config]);
 
-  // Sidebar 导航
-  const currentNav = navFromPath(location.pathname);
+  // Sidebar 导航（只有 3 个全局项）
+  const currentNav: 'writing' | 'projects' | 'settings' =
+    location.pathname.startsWith('/project') ? 'projects' :
+    location.pathname.startsWith('/settings') ? 'settings' :
+    'writing';
 
-  // 读取并应用主题设置
   const isDarkTheme = state.ui.editorPrefs.theme === 'dark';
 
-  const handleNavChange = useCallback((nav: 'writing' | 'projects' | 'characters' | 'world' | 'outline-tools' | 'prompts' | 'export' | 'settings') => {
+  const handleNavChange = useCallback((nav: 'writing' | 'projects' | 'settings') => {
     switch (nav) {
       case 'writing': navigate('/'); break;
       case 'projects': navigate('/project'); break;
-      case 'characters': navigate('/characters'); break;
-      case 'world': navigate('/world'); break;
-      case 'outline-tools': navigate('/outline-tools'); break;
-      case 'prompts': navigate('/prompts'); break;
-      case 'export': navigate('/export'); break;
       case 'settings': navigate('/settings'); break;
     }
   }, [navigate]);
@@ -304,11 +282,6 @@ function AppLayout() {
         <Routes>
           <Route path="/" element={<WritingDesk />} />
           <Route path="/project" element={<ProjectManager />} />
-          <Route path="/characters" element={<CharactersPage />} />
-          <Route path="/world" element={<WorldPage />} />
-          <Route path="/outline-tools" element={<OutlineToolsPage />} />
-          <Route path="/prompts" element={<PromptsPage />} />
-          <Route path="/export" element={<ExportPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
