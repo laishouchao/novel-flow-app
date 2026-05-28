@@ -59,7 +59,9 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: ''
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-13
+            args: '--target x86_64-apple-darwin'
           - platform: ubuntu-22.04
             args: ''
           - platform: windows-latest
@@ -77,6 +79,8 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-13' && 'x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
