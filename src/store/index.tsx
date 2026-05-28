@@ -892,20 +892,26 @@ export function AppProvider({ children }: AppProviderProps) {
       const result = saveState(state);
       if (result.error === 'STORAGE_FULL') {
         dispatch({
-          type: 'UI_ADD_NOTIFICATION',
-          payload: {
-            type: 'error',
-            title: '存储空间不足',
-            message: '无法保存项目数据到本地存储。建议导出备份后清理浏览器数据。',
+          domain: 'ui',
+          action: {
+            type: 'UI_ADD_NOTIFICATION',
+            payload: {
+              type: 'error',
+              title: '存储空间不足',
+              message: '无法保存项目数据到本地存储。建议导出备份后清理浏览器数据。',
+            },
           },
         });
       } else if (result.error === 'STORAGE_TRIMMED') {
         dispatch({
-          type: 'UI_ADD_NOTIFICATION',
-          payload: {
-            type: 'warning',
-            title: '存储空间紧张',
-            message: '本地存储空间不足，部分章节草稿已被截断。建议导出备份。',
+          domain: 'ui',
+          action: {
+            type: 'UI_ADD_NOTIFICATION',
+            payload: {
+              type: 'warning',
+              title: '存储空间紧张',
+              message: '本地存储空间不足，部分章节草稿已被截断。建议导出备份。',
+            },
           },
         });
       }
