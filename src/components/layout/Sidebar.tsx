@@ -6,11 +6,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
+  Users,
 } from 'lucide-react';
 import { StepProgressBar } from '../common/ProgressBar';
 import { ProjectStatusBadge } from '../common/Badge';
 
-type NavItem = 'writing' | 'projects' | 'settings';
+type NavItem = 'writing' | 'projects' | 'characters' | 'settings';
 
 interface SidebarProps {
   currentNav?: NavItem;
@@ -28,6 +29,7 @@ interface SidebarProps {
 const navItems: { key: NavItem; label: string; icon: React.ReactNode }[] = [
   { key: 'writing', label: '写作台', icon: <PenLine size={20} /> },
   { key: 'projects', label: '项目管理', icon: <FolderKanban size={20} /> },
+  { key: 'characters', label: '角色管理', icon: <Users size={20} /> },
   { key: 'settings', label: '设置', icon: <Settings size={20} /> },
 ];
 

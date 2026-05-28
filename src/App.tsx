@@ -13,6 +13,7 @@ import OutlinePanel from './components/outline/OutlinePanel';
 import ChapterEditor from './components/editor/ChapterEditor';
 import ReviewPanel from './components/review/ReviewPanel';
 import SettingsPanel from './components/settings/SettingsPanel';
+import CharacterPanel from './components/characters/CharacterPanel';
 import { ToastProvider } from './components/common/Toast';
 
 // ============================================================================
@@ -32,8 +33,9 @@ function getStepFromStage(stage?: ProjectStage): number {
 }
 
 /** 将路由路径映射为 Sidebar 导航项 */
-function navFromPath(pathname: string): 'writing' | 'projects' | 'settings' {
+function navFromPath(pathname: string): 'writing' | 'projects' | 'characters' | 'settings' {
   if (pathname.startsWith('/project')) return 'projects';
+  if (pathname.startsWith('/characters')) return 'characters';
   if (pathname.startsWith('/settings')) return 'settings';
   return 'writing';
 }
@@ -145,6 +147,20 @@ function SettingsPage() {
 }
 
 // ============================================================================
+// 角色管理页面
+// ============================================================================
+
+function CharactersPage() {
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-hidden">
+        <CharacterPanel />
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // 主应用布局
 // ============================================================================
 
@@ -188,10 +204,11 @@ function AppLayout() {
   // 读取并应用主题设置
   const isDarkTheme = state.ui.editorPrefs.theme === 'dark';
 
-  const handleNavChange = useCallback((nav: 'writing' | 'projects' | 'settings') => {
+  const handleNavChange = useCallback((nav: 'writing' | 'projects' | 'characters' | 'settings') => {
     switch (nav) {
       case 'writing': navigate('/'); break;
       case 'projects': navigate('/project'); break;
+      case 'characters': navigate('/characters'); break;
       case 'settings': navigate('/settings'); break;
     }
   }, [navigate]);
@@ -219,6 +236,7 @@ function AppLayout() {
         <Routes>
           <Route path="/" element={<WritingDesk />} />
           <Route path="/project" element={<ProjectManager />} />
+          <Route path="/characters" element={<CharactersPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
