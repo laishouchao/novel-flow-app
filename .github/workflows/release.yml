@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - 'main'
+
+jobs:
+  # 第一步：准备
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Read version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Verify version consistency
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          CARGO_VERSION=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').package.version")
+          echo "package.json: $PKG_VERSION"
+          echo "Cargo.toml:   $CARGO_VERSION"
+          echo "tauri.conf:   $TAURI_VERSION"
+          if [ "$PKG_VERSION" != "$CARGO_VERSION" ] || [ "$PKG_VERSION" != "$TAURI_VERSION" ]; then
+            echo "::error::版本号不一致！package.json=$PKG_VERSION, Cargo.toml=$CARGO_VERSION, tauri.conf.json=$TAURI_VERSION"
+            exit 1
+          fi
+          echo "✅ 版本号一致: v$PKG_VERSION"
+
+      - name: Cleanup existing tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          echo "清理已存在的 tag/release: $TAG"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          echo "清理完成"
+
+  # 第二步：三平台并行构建
+  release:
+    needs: prepare
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: ''
+          - platform: ubuntu-22.04
+            args: ''
+          - platform: windows-latest
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install dependencies (Ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libfuse2
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Pre-cache WiX (Windows only)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          echo "Pre-caching WiX toolset..."
+          curl -L -o wix314-binaries.zip https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+          mkdir -p "$HOME/.tauri/"
+          mv wix314-binaries.zip "$HOME/.tauri/WixTools.zip"
+          echo "WiX cached successfully"
+
+      - name: Build the app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v${{ needs.prepare.outputs.version }}
+          releaseName: "NovelFlow v${{ needs.prepare.outputs.version }}"
+          releaseBody: |
+            ## NovelFlow v${{ needs.prepare.outputs.version }}
+
+            AI辅助长篇小说写作客户端
+
+            ### 📥 下载
+            | 平台 | 文件 | 安装方式 |
+            |------|------|----------|
+            | Windows | `.msi` | 双击安装 |
+            | macOS | `.dmg` | 拖拽到 Applications |
+            | Ubuntu/Debian | `.deb` | `sudo dpkg -i` |
+            | Fedora | `.rpm` | `sudo rpm -i` |
+
+            ### ✨ 功能特性
+            - 💡 灵感收束 - 九维度渐进式脑暴
+            - 📋 章节规划 - 结构化大纲管理
+            - ✍️ AI写作 - 场景/幕节交替模式
+            - 🔍 去AI味审查 - 四层审核门控
+            - 🎨 风格引擎 - 预设风格模板
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
