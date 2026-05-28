@@ -200,8 +200,6 @@ interface CharacterDetailProps {
 }
 
 const CharacterDetail: React.FC<CharacterDetailProps> = ({ character, onEdit, onDelete }) => {
-  const [showState, setShowState] = useState(false);
-  const [showArc, setShowArc] = useState(true);
   const config = ROLE_CONFIG[character.role];
   const avatarGradient = getAvatarColor(character.name);
 
@@ -259,8 +257,7 @@ const CharacterDetail: React.FC<CharacterDetailProps> = ({ character, onEdit, on
           title="角色弧光"
           icon={<BookOpen size={16} />}
           collapsible
-          defaultOpen={showArc}
-          onToggle={() => setShowArc(!showArc)}
+          defaultOpen={true}
         >
           <FieldRow label="表面追求" value={character.surfaceGoal} />
           <FieldRow label="深层渴望" value={character.deepDesire} />
@@ -279,7 +276,6 @@ const CharacterDetail: React.FC<CharacterDetailProps> = ({ character, onEdit, on
           icon={<Clock size={16} />}
           collapsible
           defaultOpen={false}
-          onToggle={() => setShowState(!showState)}
         >
           <FieldRow label="当前状态" value={character.currentState.status} />
           {character.currentState.abilities.length > 0 && (
@@ -366,13 +362,12 @@ const CharacterDetail: React.FC<CharacterDetailProps> = ({ character, onEdit, on
 };
 
 /** 通用段落容器 */
-function Section({ title, icon, children, collapsible, defaultOpen = true, onToggle }: {
+function Section({ title, icon, children, collapsible, defaultOpen = true }: {
   title: string;
   icon: React.ReactNode;
   children: React.ReactNode;
   collapsible?: boolean;
   defaultOpen?: boolean;
-  onToggle?: () => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const isOpen = collapsible ? open : true;
@@ -380,7 +375,6 @@ function Section({ title, icon, children, collapsible, defaultOpen = true, onTog
   const handleToggle = () => {
     if (collapsible) {
       setOpen(!open);
-      onToggle?.();
     }
   };
 
@@ -696,6 +690,7 @@ function FormKeyValueInput({ label, values, onChange }: {
           type="text"
           value={key}
           onChange={e => setKey(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
           placeholder="角色名"
           className="flex-1 px-3 py-1.5 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-400"
         />
@@ -925,7 +920,7 @@ export default function CharacterPanel() {
       {/* 右侧详情 */}
       <div className="flex-1 bg-slate-50 overflow-hidden">
         {rightView === 'relations' ? (
-          <RelationGraph />
+          <RelationGraph onNodeClick={(id) => { setSelectedId(id); setRightView('characters'); }} />
         ) : editing && editChar ? (
           <div className="h-full bg-white">
             <CharacterForm

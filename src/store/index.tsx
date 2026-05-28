@@ -346,6 +346,7 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
         volumes: [],
         chapters: [],
         characters: [],
+        relations: [],
         globalSummary: null,
         brainstormMessages: [],
       };
@@ -1039,6 +1040,7 @@ export function AppProvider({ children }: AppProviderProps) {
           volumes: state.project.volumes,
           chapters: state.project.chapters,
           characters: state.project.characters,
+          relations: state.project.relations,
           brainstormMessages: state.project.brainstormMessages,
           globalSummary: state.project.globalSummary,
         });

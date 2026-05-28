@@ -7,6 +7,7 @@ import {
   Check,
 } from 'lucide-react';
 import { useAppState } from '../../store';
+import type { NovelProject, Chapter, Character, Volume, CharacterRelation } from '../../types';
 import Button from '../common/Button';
 
 // ============================================================================
@@ -14,7 +15,7 @@ import Button from '../common/Button';
 // ============================================================================
 
 /** 导出为 Markdown */
-function exportToMarkdown(project: any, chapters: any[], characters: any[], volumes: any[]): string {
+function exportToMarkdown(project: NovelProject, chapters: Chapter[], characters: Character[], volumes: Volume[]): string {
   const lines: string[] = [];
 
   // 标题
@@ -71,11 +72,11 @@ function exportToMarkdown(project: any, chapters: any[], characters: any[], volu
 }
 
 /** 导出为纯文本 */
-function exportToText(project: any, chapters: any[], volumes: any[]): string {
+function exportToText(project: NovelProject, chapters: Chapter[], volumes: Volume[]): string {
   const lines: string[] = [];
 
   lines.push(project.name);
-  lines.push('='.repeat(project.name.length * 2));
+  lines.push('='.repeat([...project.name].length * 2));
   lines.push('');
 
   const sortedVolumes = [...volumes].sort((a, b) => a.volumeNumber - b.volumeNumber);
@@ -104,7 +105,7 @@ function exportToText(project: any, chapters: any[], volumes: any[]): string {
 }
 
 /** 导出为 JSON */
-function exportToJson(project: any, chapters: any[], characters: any[], volumes: any[], relations: any[]): string {
+function exportToJson(project: NovelProject, chapters: Chapter[], characters: Character[], volumes: Volume[], relations: CharacterRelation[]): string {
   return JSON.stringify({
     project: {
       name: project.name,

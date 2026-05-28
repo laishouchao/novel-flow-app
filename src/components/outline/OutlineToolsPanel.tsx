@@ -466,13 +466,11 @@ export default function OutlineToolsPanel() {
 
   // 从项目读取伏笔和情节线数据
   const foreshadowings = useMemo(() => {
-    const raw = (currentProject as unknown as Record<string, unknown>)?.foreshadowings;
-    return (raw as Foreshadowing[]) || [];
+    return currentProject?.foreshadowings || [];
   }, [currentProject]);
 
   const storylines = useMemo(() => {
-    const raw = (currentProject as unknown as Record<string, unknown>)?.storylines;
-    return (raw as Storyline[]) || [];
+    return currentProject?.storylines || [];
   }, [currentProject]);
 
   const [activeTab, setActiveTab] = useState<'foreshadowing' | 'storyline'>('foreshadowing');
@@ -489,7 +487,7 @@ export default function OutlineToolsPanel() {
     } else {
       updated = [...foreshadowings, item];
     }
-    dispatch(projectActions.update({ foreshadowings: updated } as Record<string, unknown>));
+    dispatch(projectActions.update({ foreshadowings: updated }));
     setShowForm(false);
     setEditingItem(undefined);
   }, [currentProject, foreshadowings, editingItem, dispatch]);
@@ -503,7 +501,7 @@ export default function OutlineToolsPanel() {
     } else {
       updated = [...storylines, item];
     }
-    dispatch(projectActions.update({ storylines: updated } as Record<string, unknown>));
+    dispatch(projectActions.update({ storylines: updated }));
     setShowForm(false);
     setEditingItem(undefined);
   }, [currentProject, storylines, editingItem, dispatch]);
@@ -512,10 +510,10 @@ export default function OutlineToolsPanel() {
     if (!deleteConfirm || !currentProject) return;
     if (deleteConfirm.type === 'foreshadowing') {
       const updated = foreshadowings.filter(f => f.id !== deleteConfirm.id);
-      dispatch(projectActions.update({ foreshadowings: updated } as Record<string, unknown>));
+      dispatch(projectActions.update({ foreshadowings: updated }));
     } else {
       const updated = storylines.filter(s => s.id !== deleteConfirm.id);
-      dispatch(projectActions.update({ storylines: updated } as Record<string, unknown>));
+      dispatch(projectActions.update({ storylines: updated }));
     }
     setDeleteConfirm(null);
   }, [deleteConfirm, currentProject, foreshadowings, storylines, dispatch]);

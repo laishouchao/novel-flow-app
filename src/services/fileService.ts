@@ -12,7 +12,7 @@
 //       角色名.md            - 角色设定
 // ============================================================================
 
-import type { NovelProject, Volume, Chapter, Character, BrainstormMessage, GlobalSummary } from '../types';
+import type { NovelProject, Volume, Chapter, Character, CharacterRelation, BrainstormMessage, GlobalSummary } from '../types';
 
 /** 项目文件结构 */
 export interface ProjectFileData {
@@ -20,6 +20,7 @@ export interface ProjectFileData {
   volumes: Volume[];
   chapters: Chapter[];
   characters: Character[];
+  relations: CharacterRelation[];
   brainstormMessages: BrainstormMessage[];
   globalSummary: GlobalSummary | null;
 }
@@ -110,7 +111,7 @@ export async function selectProjectFolder(): Promise<string | null> {
  * @param data 项目完整数据
  */
 export async function saveProjectToDisk(storagePath: string, data: ProjectFileData): Promise<void> {
-  const { project, volumes, chapters, characters, brainstormMessages, globalSummary } = data;
+  const { project, volumes, chapters, characters, relations, brainstormMessages, globalSummary } = data;
 
   // 确保目录存在
   await ensureDir(storagePath);
@@ -124,6 +125,7 @@ export async function saveProjectToDisk(storagePath: string, data: ProjectFileDa
     ...project,
     volumes,
     characters,
+    relations,
     brainstormMessages,
     globalSummary,
     // 章节只保存索引信息，内容单独存文件
@@ -275,6 +277,7 @@ export async function loadProjectFromDisk(storagePath: string): Promise<ProjectF
       volumes,
       chapters,
       characters,
+      relations: saved.relations || [],
       brainstormMessages: saved.brainstormMessages || [],
       globalSummary: saved.globalSummary || null,
     };

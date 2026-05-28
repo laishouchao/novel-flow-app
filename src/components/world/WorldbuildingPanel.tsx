@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   Globe,
   Plus,
@@ -364,17 +364,16 @@ export default function WorldbuildingPanel() {
 
   // 从项目中读取世界观数据
   const worldData = useMemo(() => {
-    const raw = (currentProject as unknown as Record<string, unknown>)?.worldbuilding;
+    const raw = currentProject?.worldbuilding;
     if (typeof raw === 'string') {
       try { return JSON.parse(raw) as Record<string, Record<string, string>>; }
       catch { return {}; }
     }
-    return (raw as Record<string, Record<string, string>>) || {};
+    return (raw || {}) as Record<string, Record<string, string>>;
   }, [currentProject]);
 
   const factions = useMemo(() => {
-    const raw = (currentProject as unknown as Record<string, unknown>)?.worldFactions;
-    return (raw as WorldFaction[]) || [];
+    return currentProject?.worldFactions || [];
   }, [currentProject]);
 
   const [activeTab, setActiveTab] = useState<'modules' | 'factions'>('modules');
@@ -382,14 +381,19 @@ export default function WorldbuildingPanel() {
   const [editingFaction, setEditingFaction] = useState<WorldFaction | undefined>(undefined);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+  // 用 ref 保持最新的 worldData，避免 stale closure
+  const worldDataRef = useRef(worldData);
+  useEffect(() => { worldDataRef.current = worldData; }, [worldData]);
+
   // 保存世界观字段
   const handleFieldChange = useCallback((moduleId: string, key: string, value: string) => {
     if (!currentProject) return;
-    const newData = { ...worldData };
+    const latest = worldDataRef.current;
+    const newData = { ...latest };
     if (!newData[moduleId]) newData[moduleId] = {};
     newData[moduleId][key] = value;
     dispatch(projectActions.update({ worldbuilding: JSON.stringify(newData) }));
-  }, [currentProject, worldData, dispatch]);
+  }, [currentProject, dispatch]);
 
   // 势力操作
   const handleSaveFaction = useCallback((faction: WorldFaction) => {

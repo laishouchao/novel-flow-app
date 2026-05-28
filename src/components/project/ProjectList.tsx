@@ -84,10 +84,11 @@ const ProjectList: React.FC = () => {
       try {
         const projectData = await loadProjectFromDisk(novelProject.storagePath);
         if (projectData) {
-          // 加载成功：设置 volumes、chapters、characters
+          // 加载成功：设置 volumes、chapters、characters、relations
           dispatch(projectActions.setVolumes(projectData.volumes));
           dispatch(projectActions.setChapters(projectData.chapters));
           dispatch(projectActions.setCharacters(projectData.characters));
+          dispatch(projectActions.setRelations(projectData.relations));
           if (projectData.globalSummary) {
             dispatch(projectActions.setGlobalSummary(projectData.globalSummary));
           }

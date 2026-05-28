@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AppProvider, useAppState, useAppDispatch, uiActions, selectWritingProgress } from './store';
 import type { ProjectStage } from './types';
@@ -80,15 +80,11 @@ const WRITING_TABS: { key: WritingTab; label: string; icon: React.ReactNode }[] 
 function WritingDesk() {
   const state = useAppState();
 
-  const currentView = state.ui.currentView;
   const projectStatus = state.project.currentProject?.status;
   const projectStage = state.project.currentProject?.stage;
 
   // 根据项目状态决定默认 Tab
   const getDefaultTab = (): WritingTab => {
-    if (currentView === 'editor') return 'editor';
-    if (currentView === 'review') return 'review';
-    if (currentView === 'brainstorm') return 'brainstorm';
     if (projectStage === 'outline' || projectStatus === 'planned') return 'outline';
     if (projectStatus === 'idea' && projectStage === 'brainstorm') return 'brainstorm';
     if (projectStatus === 'drafting') return 'editor';
@@ -98,15 +94,14 @@ function WritingDesk() {
 
   const [activeTab, setActiveTab] = useState<WritingTab>(getDefaultTab);
 
-  // 当项目状态变化时，自动切换到对应 Tab（仅在初始/状态切换时）
+  // 追踪用户是否手动选择了辅助 Tab（不自动切换）
+  const userSelectedAuxRef = useRef(false);
+
+  // 仅在项目 stage/status 变化时自动切换（不响应 currentView 变化）
   useEffect(() => {
-    const defaultTab = getDefaultTab();
-    // 只在当前 tab 是默认的工作流 tab 时自动切换（不覆盖用户手动选择的辅助 tab）
-    const workflowTabs: WritingTab[] = ['brainstorm', 'outline', 'editor', 'review'];
-    if (workflowTabs.includes(activeTab)) {
-      setActiveTab(defaultTab);
-    }
-  }, [projectStage, projectStatus, currentView]);
+    if (userSelectedAuxRef.current) return; // 用户手动选了辅助 tab，不自动切换
+    setActiveTab(getDefaultTab());
+  }, [projectStage, projectStatus]);
 
   // 缓存总字数计算
   const totalWordCount = useMemo(
@@ -142,7 +137,12 @@ function WritingDesk() {
         {WRITING_TABS.map(tab => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
+            onClick={() => {
+              setActiveTab(tab.key);
+              // 辅助 Tab 标记为用户手动选择，不被自动切换覆盖
+              const auxTabs: WritingTab[] = ['characters', 'world', 'outline-tools', 'prompts', 'export'];
+              userSelectedAuxRef.current = auxTabs.includes(tab.key);
+            }}
             className={`
               flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap
               border-b-2 transition-colors

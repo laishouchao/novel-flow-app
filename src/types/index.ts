@@ -64,6 +64,18 @@ export interface NovelProject {
 
   // ---- canon 变更日志 ----
   canonLog: CanonEntry[];
+
+  // ---- 世界观设定（JSON 字符串，存储 Record<string, Record<string, string>>） ----
+  worldbuilding?: string;
+
+  // ---- 势力/阵营 ----
+  worldFactions?: WorldFaction[];
+
+  // ---- 伏笔追踪 ----
+  foreshadowings?: Foreshadowing[];
+
+  // ---- 情节线管理 ----
+  storylines?: Storyline[];
 }
 
 // ============================================================================
@@ -343,6 +355,8 @@ export interface AppConfig {
   customStyles: NovelStyle[];
   proxySetting: ProxySetting;
   recentProjects: string[];
+  /** 自定义提示词覆盖（taskType -> 自定义内容） */
+  customPrompts?: Record<string, string>;
 }
 
 // ============================================================================

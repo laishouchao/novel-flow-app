@@ -201,7 +201,7 @@ export default function PromptManagerPanel() {
 
   // 获取自定义提示词覆盖
   const customPrompts = useMemo(() => {
-    const raw = (state.ai.config as unknown as Record<string, unknown>)?.customPrompts;
+    const raw = state.ai.config?.customPrompts;
     return (raw as Record<string, string>) || {};
   }, [state.ai.config]);
 
@@ -210,14 +210,14 @@ export default function PromptManagerPanel() {
   // 保存自定义提示词
   const handleSave = useCallback((taskType: string, content: string) => {
     const updated = { ...customPrompts, [taskType]: content };
-    dispatch(aiActions.updateConfig({ customPrompts: updated } as Record<string, unknown>));
+    dispatch(aiActions.updateConfig({ customPrompts: updated }));
   }, [customPrompts, dispatch]);
 
   // 恢复默认
   const handleReset = useCallback((taskType: string) => {
     const updated = { ...customPrompts };
     delete updated[taskType];
-    dispatch(aiActions.updateConfig({ customPrompts: updated } as Record<string, unknown>));
+    dispatch(aiActions.updateConfig({ customPrompts: updated }));
   }, [customPrompts, dispatch]);
 
   // 搜索过滤
