@@ -6,6 +6,7 @@ import Button from '../common/Button';
 import Badge, { ProjectStatusBadge } from '../common/Badge';
 import ProgressBar from '../common/ProgressBar';
 import { useAppState, useAppDispatch, projectActions, editorActions, uiActions } from '../../store';
+import { loadProjectFromDisk } from '../../services/fileService';
 import type { NovelProject } from '../../types';
 
 interface Project {
@@ -66,16 +67,40 @@ const ProjectList: React.FC = () => {
     [state.project.projects, state.project.chapters]
   );
 
-  const handleOpen = (project: Project) => {
+  const handleOpen = async (project: Project) => {
     const novelProject = state.project.projects.find((p) => p.id === project.id);
-    if (novelProject) {
-      // 切换项目时重置编辑器和UI状态，避免显示其他项目的内容
-      dispatch(editorActions.setContent(''));
-      dispatch(editorActions.setChapter(null));
-      dispatch(uiActions.setView('home'));
-      dispatch(projectActions.setCurrent(novelProject));
-      navigate('/');
+    if (!novelProject) return;
+
+    // 切换项目时重置编辑器和UI状态，避免显示其他项目的内容
+    dispatch(editorActions.setContent(''));
+    dispatch(editorActions.setChapter(null));
+    dispatch(uiActions.setView('home'));
+
+    // 先设置当前项目（显示加载状态）
+    dispatch(projectActions.setCurrent(novelProject));
+
+    // 如果项目有存储路径，从磁盘加载完整数据（volumes/chapters/characters）
+    if (novelProject.storagePath) {
+      try {
+        const projectData = await loadProjectFromDisk(novelProject.storagePath);
+        if (projectData) {
+          // 加载成功：设置 volumes、chapters、characters
+          dispatch(projectActions.setVolumes(projectData.volumes));
+          dispatch(projectActions.setChapters(projectData.chapters));
+          dispatch(projectActions.setCharacters(projectData.characters));
+          if (projectData.globalSummary) {
+            dispatch(projectActions.setGlobalSummary(projectData.globalSummary));
+          }
+          if (projectData.brainstormMessages.length > 0) {
+            dispatch(projectActions.setBrainstormMessages(projectData.brainstormMessages));
+          }
+        }
+      } catch (e) {
+        console.error('[ProjectList] 从磁盘加载项目失败:', e);
+      }
     }
+
+    navigate('/');
   };
 
   const handleDelete = (e: React.MouseEvent, project: Project) => {
