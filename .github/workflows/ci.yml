@@ -47,6 +47,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
         env:
