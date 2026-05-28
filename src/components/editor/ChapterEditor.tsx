@@ -140,6 +140,14 @@ const ChapterEditor: React.FC = () => {
     }
   }, [currentChapter, state.project.chapters, dispatch]);
 
+  // 当选中的章节变化时，更新项目的当前卷/章节索引（用于 StatusBar 显示）
+  useEffect(() => {
+    if (currentChapter) {
+      dispatch(projectActions.setCurrentVolume(currentChapter.volumeNumber));
+      dispatch(projectActions.setCurrentChapter(currentChapter.chapterNumber));
+    }
+  }, [currentChapter?.id, currentChapter?.volumeNumber, currentChapter?.chapterNumber, dispatch]);
+
   const chapterTitle = currentChapter?.title ?? '未选择章节';
   const initialContent = editorContent;
 

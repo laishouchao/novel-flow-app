@@ -146,6 +146,8 @@ export type ProjectAction =
   | { type: 'PROJECT_SET_STAGE'; payload: ProjectStage }
   | { type: 'PROJECT_SET_LOADING'; payload: boolean }
   | { type: 'PROJECT_SET_ERROR'; payload: string | null }
+  | { type: 'PROJECT_SET_CURRENT_VOLUME'; payload: number }
+  | { type: 'PROJECT_SET_CURRENT_CHAPTER'; payload: number }
   | { type: 'VOLUME_SET_LIST'; payload: Volume[] }
   | { type: 'VOLUME_ADD'; payload: Volume }
   | { type: 'VOLUME_UPDATE'; payload: { id: string; updates: Partial<Volume> } }
@@ -399,6 +401,34 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
       const updated = {
         ...state.currentProject,
         stage: action.payload,
+        updatedAt: new Date().toISOString(),
+      };
+      return {
+        ...state,
+        currentProject: updated,
+        projects: state.projects.map((p) => (p.id === updated.id ? updated : p)),
+      };
+    }
+
+    case 'PROJECT_SET_CURRENT_VOLUME': {
+      if (!state.currentProject) return state;
+      const updated = {
+        ...state.currentProject,
+        currentVolume: action.payload,
+        updatedAt: new Date().toISOString(),
+      };
+      return {
+        ...state,
+        currentProject: updated,
+        projects: state.projects.map((p) => (p.id === updated.id ? updated : p)),
+      };
+    }
+
+    case 'PROJECT_SET_CURRENT_CHAPTER': {
+      if (!state.currentProject) return state;
+      const updated = {
+        ...state.currentProject,
+        currentChapter: action.payload,
         updatedAt: new Date().toISOString(),
       };
       return {
@@ -1089,6 +1119,10 @@ export const projectActions = {
     domainAction('project', { type: 'PROJECT_SET_STATUS', payload: { status, blockedReason } }),
   setStage: (stage: ProjectStage) =>
     domainAction('project', { type: 'PROJECT_SET_STAGE', payload: stage }),
+  setCurrentVolume: (volumeNumber: number) =>
+    domainAction('project', { type: 'PROJECT_SET_CURRENT_VOLUME', payload: volumeNumber }),
+  setCurrentChapter: (chapterNumber: number) =>
+    domainAction('project', { type: 'PROJECT_SET_CURRENT_CHAPTER', payload: chapterNumber }),
   setLoading: (loading: boolean) =>
     domainAction('project', { type: 'PROJECT_SET_LOADING', payload: loading }),
   setError: (error: string | null) =>

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from
 import { AppProvider, useAppState, useAppDispatch, uiActions, selectWritingProgress } from './store';
 import type { ProjectStage } from './types';
 import { llmService } from './services/llm';
+import { countChineseWords } from './utils/wordCount';
 import Sidebar from './components/layout/Sidebar';
 import StatusBar from './components/layout/StatusBar';
 import ProjectList from './components/project/ProjectList';
@@ -105,7 +106,7 @@ function WritingDesk() {
         volumeIndex={state.project.currentProject.currentVolume}
         chapterIndex={state.project.currentProject.currentChapter}
         projectStatus={state.project.currentProject.status}
-        chapterWordCount={state.editor.currentChapter?.wordCount}
+        chapterWordCount={countChineseWords(state.editor.editorContent)}
         totalWordCount={totalWordCount}
         targetWordCount={state.project.currentProject.targetWords}
         aiModelStatus={state.ai.config?.llmConfigs && state.ai.config.llmConfigs.length > 0 ? 'connected' : 'disconnected'}
