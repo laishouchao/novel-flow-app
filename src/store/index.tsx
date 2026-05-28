@@ -139,7 +139,7 @@ export type ProjectAction =
   | { type: 'PROJECT_SET_CURRENT'; payload: NovelProject }
   | { type: 'PROJECT_CLEAR_CURRENT' }
   | { type: 'PROJECT_ADD'; payload: NovelProject }
-  | { type: 'PROJECT_UPDATE'; payload: Partial<NovelProject> }
+  | { type: 'PROJECT_UPDATE'; payload: Partial<NovelProject> & Record<string, unknown> }
   | { type: 'PROJECT_DELETE'; payload: string }
   | { type: 'PROJECT_SET_STATUS'; payload: { status: ProjectStatus; blockedReason?: string } }
   | { type: 'PROJECT_SET_STAGE'; payload: ProjectStage }
@@ -295,18 +295,20 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
     case 'PROJECT_SET_CURRENT': {
       // 切换项目时，重置所有项目关联状态，防止旧项目数据污染新项目
       const isNewProject = state.currentProject?.id !== action.payload.id;
+      const proj = action.payload as NovelProject & Record<string, unknown>;
       return {
         ...state,
         currentProject: action.payload,
         loading: false,
         error: null,
         // 仅在切换到不同项目时重置关联状态
+        // 但如果项目对象上已有数据（从 PROJECT_UPDATE 存储的），则恢复而非清空
         ...(isNewProject ? {
-          volumes: [],
-          chapters: [],
-          characters: [],
-          globalSummary: null,
-          brainstormMessages: [],
+          volumes: Array.isArray(proj.volumes) ? proj.volumes as Volume[] : [],
+          chapters: Array.isArray(proj.chapters) ? proj.chapters as Chapter[] : [],
+          characters: Array.isArray(proj.characters) ? proj.characters as Character[] : [],
+          globalSummary: (proj.globalSummary as GlobalSummary) ?? null,
+          brainstormMessages: Array.isArray(proj.brainstormMessages) ? proj.brainstormMessages as BrainstormMessage[] : [],
         } : {}),
       };
     }
@@ -339,12 +341,31 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
       const updates = action.payload;
       if (!state.currentProject) return state;
       const updated = { ...state.currentProject, ...updates, updatedAt: new Date().toISOString() };
+      // 同步分离字段：当 updates 中包含 volumes/chapters/characters 等数据时，
+      // 同时更新顶层分离字段，确保 OutlinePanel 等组件能读取到数据
+      const fieldSync: Partial<ProjectState> = {};
+      if ('volumes' in updates && Array.isArray(updates.volumes)) {
+        fieldSync.volumes = updates.volumes as Volume[];
+      }
+      if ('chapters' in updates && Array.isArray(updates.chapters)) {
+        fieldSync.chapters = updates.chapters as Chapter[];
+      }
+      if ('characters' in updates && Array.isArray(updates.characters)) {
+        fieldSync.characters = updates.characters as Character[];
+      }
+      if ('globalSummary' in updates) {
+        fieldSync.globalSummary = updates.globalSummary as GlobalSummary | null;
+      }
+      if ('brainstormMessages' in updates && Array.isArray(updates.brainstormMessages)) {
+        fieldSync.brainstormMessages = updates.brainstormMessages as BrainstormMessage[];
+      }
       return {
         ...state,
         currentProject: updated,
         projects: state.projects.map((p) =>
           p.id === updated.id ? updated : p
         ),
+        ...fieldSync,
       };
     }
 
@@ -1014,7 +1035,7 @@ export const projectActions = {
     domainAction('project', { type: 'PROJECT_CLEAR_CURRENT' }),
   add: (project: NovelProject) =>
     domainAction('project', { type: 'PROJECT_ADD', payload: project }),
-  update: (updates: Partial<NovelProject>) =>
+  update: (updates: Partial<NovelProject> & Record<string, unknown>) =>
     domainAction('project', { type: 'PROJECT_UPDATE', payload: updates }),
   delete: (id: string) =>
     domainAction('project', { type: 'PROJECT_DELETE', payload: id }),

@@ -380,6 +380,21 @@ const BrainstormPanel: React.FC = () => {
     } else {
       dispatch(projectActions.update({ coreSeed: previewContent, status: 'planned', stage: 'outline' }));
     }
+    // 创建默认卷（如果 store 中还没有卷对象）
+    // OutlinePanel 需要至少一个卷来显示章节
+    const currentProject = state.project.currentProject;
+    if (currentProject && state.project.volumes.length === 0) {
+      const defaultVolume: import('../../types').Volume = {
+        id: `vol-${currentProject.id}-1`,
+        projectId: currentProject.id,
+        volumeNumber: 1,
+        title: '第一卷',
+        goal: '',
+        futureDirection: '',
+        createdAt: new Date().toISOString(),
+      };
+      dispatch(projectActions.addVolume(defaultVolume));
+    }
     dispatch(uiActions.setView('home'));
   };
 

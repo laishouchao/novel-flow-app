@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -179,10 +179,28 @@ const OutlinePanel: React.FC = () => {
 
   const storeVolumes = state.project.volumes;
   const storeChapters = state.project.chapters;
+  const currentProject = state.project.currentProject;
+
+  // 如果 store 中没有卷但有项目，自动创建默认卷
+  useEffect(() => {
+    if (storeVolumes.length === 0 && currentProject) {
+      const defaultVolume: import('../../types').Volume = {
+        id: `vol-${currentProject.id}-1`,
+        projectId: currentProject.id,
+        volumeNumber: 1,
+        title: '第一卷',
+        goal: '',
+        futureDirection: '',
+        createdAt: new Date().toISOString(),
+      };
+      dispatch(projectActions.addVolume(defaultVolume));
+    }
+  }, [storeVolumes.length, currentProject, dispatch]);
 
   // 将 store 数据转换为组件内部格式
+  // 处理两种情况：1) 有卷有章节 2) 无卷但有章节（将章节归入默认卷）
   const volumes = useMemo<Volume[]>(() => {
-    return storeVolumes
+    const mapped = storeVolumes
       .sort((a, b) => a.volumeNumber - b.volumeNumber)
       .map((vol) => ({
         id: vol.id,
@@ -202,6 +220,40 @@ const OutlinePanel: React.FC = () => {
             cognitiveSubversion: ch.plotTwistLevel * 2, // store 1-5 -> 组件 0-10
           })),
       }));
+
+    // 处理孤儿章节：不属于任何已有卷的章节
+    const assignedChapterIds = new Set(
+      mapped.flatMap((v) => v.chapters.map((c) => c.id))
+    );
+    const orphanChapters = storeChapters
+      .filter((ch) => !assignedChapterIds.has(ch.id))
+      .sort((a, b) => a.chapterNumber - b.chapterNumber)
+      .map((ch) => ({
+        id: ch.id,
+        index: ch.chapterNumber,
+        title: ch.title,
+        structure: mapStructureTag(ch.structureTag),
+        suspenseDensity: ch.suspenseLevel,
+        status: mapChapterStatus(ch.status),
+        taskDescription: ch.task,
+        foreshadowing: ch.foreshadowing,
+        cognitiveSubversion: ch.plotTwistLevel * 2,
+      }));
+
+    // 如果有孤儿章节，将它们放入第一个卷（或创建默认卷）
+    if (orphanChapters.length > 0) {
+      if (mapped.length > 0) {
+        mapped[0].chapters = [...mapped[0].chapters, ...orphanChapters];
+      } else {
+        mapped.push({
+          id: 'vol-default',
+          name: '默认卷',
+          chapters: orphanChapters,
+        });
+      }
+    }
+
+    return mapped;
   }, [storeVolumes, storeChapters]);
 
   const [activeVolumeId, setActiveVolumeId] = useState(volumes[0]?.id || '');
@@ -212,6 +264,13 @@ const OutlinePanel: React.FC = () => {
   // 流式输出缓冲 - 使用 useRef 避免每个 token 都触发重渲染
   const streamBufferRef = useRef<Record<string, string>>({});
   const streamRafRef = useRef<Record<string, number>>({});
+
+  // 当卷列表变化时，自动选中第一个卷
+  useEffect(() => {
+    if (volumes.length > 0 && !volumes.find(v => v.id === activeVolumeId)) {
+      setActiveVolumeId(volumes[0].id);
+    }
+  }, [volumes, activeVolumeId]);
 
   // 编辑模式下的临时编辑状态
   const [editTask, setEditTask] = useState('');
@@ -652,8 +711,15 @@ const OutlinePanel: React.FC = () => {
 
       {/* 章节列表 - 使用窗口化渲染优化大型项目性能 */}
       <div className="flex-1 overflow-y-auto">
-        {activeVolume && (
+        {activeVolume ? (
           <div className="divide-y divide-slate-100">
+            {activeVolume.chapters.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                <FileText size={48} className="mb-4 opacity-30" />
+                <p className="text-sm mb-2">暂无章节大纲</p>
+                <p className="text-xs text-slate-300">点击上方「生成全部」按钮，AI 将自动生成章节大纲</p>
+              </div>
+            )}
             {activeVolume.chapters.map((chapter) => (
               <div key={chapter.id}>
                 {/* 章节行 */}
@@ -806,6 +872,11 @@ const OutlinePanel: React.FC = () => {
                 </button>
               </div>
             )}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+            <FileText size={48} className="mb-4 opacity-30" />
+            <p className="text-sm mb-2">正在加载大纲数据...</p>
           </div>
         )}
       </div>
