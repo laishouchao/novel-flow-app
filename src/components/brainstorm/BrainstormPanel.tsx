@@ -18,17 +18,17 @@ import { aiPipeline } from '../../services/aiPipeline';
 import { hasLLMConfig } from '../../utils/llmHelpers';
 import type { BrainstormDimension, NovelProject } from '../../types';
 
-/** 灵感收束的9个维度 */
+/** 灵感收束的9个维度（显示名称与提示词模板一一对应） */
 const DIMENSIONS = [
-  '核心概念',
-  '世界观设定',
-  '主角人设',
+  '类型基调',
   '核心冲突',
-  '情感基调',
-  '叙事视角',
-  '关键转折',
-  '主题深度',
+  '主角原型',
+  '世界观设定',
+  '叙事结构',
+  '情感内核',
   '独特卖点',
+  '角色关系网',
+  '终局愿景',
 ];
 
 /** DIMENSIONS 数组索引 0-8 对应 BrainstormDimension 类型 */
@@ -160,7 +160,7 @@ const BrainstormPanel: React.FC = () => {
       const welcomeMsg: ChatMessage = {
         id: `ai-${Date.now()}`,
         role: 'ai',
-        content: `欢迎来到灵感收束！我们将通过 ${DIMENSIONS.length} 个维度来构建你的小说蓝图。\n\n让我们从第一个维度开始：**${DIMENSIONS[0]}**\n\n请描述你想要创作的小说的核心概念是什么？`,
+        content: `欢迎来到灵感收束！我们将通过 ${DIMENSIONS.length} 个维度来构建你的小说蓝图。\n\n请先描述你想要创作的故事的核心想法是什么？比如题材、背景、主角身份等。\n\nAI 将根据你的描述，在第一个维度"**${DIMENSIONS[0]}**"中为你生成选项。`,
         options: ['我想写一个关于...的故事', '让我想想...', '我有一个大致的想法'],
         timestamp: new Date(),
       };

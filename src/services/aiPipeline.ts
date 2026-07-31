@@ -161,6 +161,9 @@ export class AIPipeline {
   /**
    * 灵感收束：根据当前维度和历史对话，生成下一个问题（流式版本）
    *
+   * 核心改进：将完整对话历史作为 ChatMessage[] 传递给 LLM，
+   * 而不是仅依赖上下文摘要字符串。这样 AI 能看到用户实际输入的内容。
+   *
    * @param dimension 当前维度 ID（如 'genreTone', 'coreConflict' 等）
    * @param history 之前的对话历史
    * @param onToken 流式回调，每收到一个 token 片段就调用
@@ -191,11 +194,18 @@ export class AIPipeline {
       worldSetting: projectInfo?.worldBuilding ?? '待定',
     });
 
-    // 组装消息
+    // 组装消息：system + 完整对话历史 + 当前维度提示词
     const messages: ChatMessage[] = [
       { role: 'system', content: brainstormSystemPrompt },
-      { role: 'user', content: userPrompt },
     ];
+
+    // 将历史对话注入为 chat 消息，让 AI 看到用户实际输入的内容
+    // 跳过第一条欢迎消息（assistant 的初始化消息）
+    const historyMessages = this.buildChatHistoryFromBrainstorm(history);
+    messages.push(...historyMessages);
+
+    // 当前维度的提问作为最后一条 user 消息
+    messages.push({ role: 'user', content: userPrompt });
 
     // 调用 LLM 流式接口
     let fullContent = '';
@@ -251,11 +261,14 @@ export class AIPipeline {
       worldSetting: projectInfo?.worldBuilding ?? '待定',
     });
 
-    // 组装消息
+    // 组装消息：system + 完整对话历史 + 当前维度提示词
     const messages: ChatMessage[] = [
       { role: 'system', content: brainstormSystemPrompt },
-      { role: 'user', content: userPrompt },
     ];
+
+    const historyMessages = this.buildChatHistoryFromBrainstorm(history);
+    messages.push(...historyMessages);
+    messages.push({ role: 'user', content: userPrompt });
 
     // 调用 LLM
     const response = await this.llm.chat(messages, undefined, 'brainstorm');
@@ -821,34 +834,69 @@ ${chapter.draftContent}
   // ============================================================
 
   /**
+   * 将 BrainstormMessage[] 转换为 ChatMessage[] 供 LLM 使用
+   * 跳过第一条欢迎消息，将后续消息按 user/assistant 角色传递
+   */
+  private buildChatHistoryFromBrainstorm(history: BrainstormMessage[]): ChatMessage[] {
+    if (history.length === 0) return [];
+
+    const chatMessages: ChatMessage[] = [];
+    for (let i = 0; i < history.length; i++) {
+      const msg = history[i];
+
+      // 跳过第一条 assistant 欢迎消息（通常是初始化的引导语）
+      if (i === 0 && msg.role === 'assistant') continue;
+
+      chatMessages.push({
+        role: msg.role === 'user' ? 'user' : 'assistant',
+        content: msg.content,
+      });
+    }
+
+    return chatMessages;
+  }
+
+  /**
    * 构建灵感收束的上下文摘要
+   * 作为 {previousContext} 变量填入提示词模板
+   *
+   * 修复：使用所有历史消息（不再过滤 confirmed），确保 AI 能看到用户之前的输入
    */
   private buildBrainstormContext(
     history: BrainstormMessage[],
     projectInfo?: Partial<NovelProject>,
   ): string {
-    const confirmedMessages = history.filter((msg) => msg.confirmed);
-    if (confirmedMessages.length === 0 && !projectInfo) {
-      return '这是我们的第一次对话，让我们开始构思你的小说吧！';
+    // 使用所有历史消息，不再依赖 confirmed 标记
+    const allMessages = history.filter((msg) => !(history[0] === msg && msg.role === 'assistant'));
+    if (allMessages.length === 0 && !projectInfo) {
+      return '这是我们的第一次对话，请根据用户接下来的描述来构思。';
     }
 
     const parts: string[] = [];
 
     if (projectInfo) {
-      if (projectInfo.genre) parts.push(`类型：${projectInfo.genre}`);
-      if (projectInfo.theme) parts.push(`主题：${projectInfo.theme}`);
-      if (projectInfo.coreSeed) parts.push(`核心种子：${projectInfo.coreSeed}`);
+      if (projectInfo.genre) parts.push(`已确认类型：${projectInfo.genre}`);
+      if (projectInfo.theme) parts.push(`已确认主题：${projectInfo.theme}`);
+      if (projectInfo.coreSeed) parts.push(`核心概念：${projectInfo.coreSeed}`);
       if (projectInfo.worldBuilding) parts.push(`世界观：${projectInfo.worldBuilding}`);
     }
 
-    if (confirmedMessages.length > 0) {
-      parts.push('\n已确认的信息：');
-      for (const msg of confirmedMessages) {
-        parts.push(`- [${msg.dimension}] ${msg.content.slice(0, 200)}`);
+    if (allMessages.length > 0) {
+      parts.push('\n用户在之前的对话中的关键选择：');
+      for (const msg of allMessages) {
+        if (msg.role === 'user') {
+          parts.push(`- 用户输入：${msg.content.slice(0, 300)}`);
+        } else if (msg.role === 'assistant') {
+          // 只提取选项摘要，不复制全部 AI 回复（避免 token 浪费）
+          const optionMatch = msg.content.match(/^([A-E])[.．、]\s*(.+)$/gm);
+          if (optionMatch) {
+            parts.push(`- AI 选项：${optionMatch.slice(0, 4).join(' | ')}`);
+          }
+        }
       }
     }
 
-    return parts.join('\n');
+    return parts.join('\n') || '请根据用户接下来的描述来构思。';
   }
 
   /**
