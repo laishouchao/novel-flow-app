@@ -603,7 +603,7 @@ export class LLMService {
     const url = this.buildUrl(config);
     const body = this.buildRequestBody(
       [{ role: 'user', content: '请回复"连接成功"四个字。' }],
-      { ...config, maxTokens: 20, timeout: 15000 },
+      { ...config, maxTokens: 150, timeout: 15000 },
       false,
     );
     const headers = this.buildHeaders(config);
@@ -734,7 +734,9 @@ export class LLMService {
   }
 
   /**
-   * 提取响应内容
+   * 从 API 响应中提取内容
+   * 支持标准 OpenAI 格式和兼容格式
+   * 兼容推理模型：优先使用 content，如果为空则回退到 reasoning_content
    */
   private extractContent(data: Record<string, unknown>): string {
     const choices = data.choices as Array<Record<string, unknown>> | undefined;
@@ -743,7 +745,21 @@ export class LLMService {
     }
 
     const message = choices[0].message as Record<string, unknown> | undefined;
-    return (message?.content as string) ?? '';
+    if (!message) return '';
+
+    // 优先使用 content（正常回复）
+    const content = message.content as string;
+    if (content && content.length > 0) {
+      return content;
+    }
+
+    // 回退到 reasoning_content（推理模型的思考输出）
+    const reasoningContent = message.reasoning_content as string;
+    if (reasoningContent && reasoningContent.length > 0) {
+      return reasoningContent;
+    }
+
+    return '';
   }
 
 }
