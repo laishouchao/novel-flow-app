@@ -20,8 +20,7 @@ import {
 } from 'lucide-react';
 import Button from '../common/Button';
 import Badge from '../common/Badge';
-import { useAppState, useAppDispatch, projectActions } from '../../store';
-import { aiPipeline } from '../../services/aiPipeline';
+import { useAppState, useAppDispatch, projectActions, uiActions } from '../../store';
 import type { ReviewResult as StoreReviewResult, ReviewVerdict, ReviewIssueType, ReviewIssueSeverity } from '../../types';
 
 type ReviewResult = 'pass' | 'minor_fix' | 'rewrite_required' | 'reject';
@@ -223,37 +222,22 @@ const ReviewPanel: React.FC = () => {
     fail: 'bg-red-50 border-red-200',
   };
 
-  const handleAccept = async () => {
+  const handleAccept = () => {
     if (currentChapter) {
       dispatch(projectActions.setChapterStatus(currentChapter.id, 'done'));
-
-      // 定稿后自动同步设定（异步，不阻塞 UI）
-      try {
-        const project = state.project.currentProject;
-        const characters = state.project.characters;
-        const globalSummary = state.project.globalSummary;
-        const canonLog = project?.canonLog ?? [];
-
-        if (project) {
-          aiPipeline.updateProjectState(
-            project,
-            currentChapter,
-            { characters, globalSummary, canonLog },
-          );
-        }
-      } catch (err) {
-        console.error('[ReviewPanel] 设定同步失败:', err);
-      }
+      dispatch(uiActions.setView('editor'));
     }
   };
 
   const handleRewrite = () => {
     if (currentChapter) {
       dispatch(projectActions.setChapterStatus(currentChapter.id, 'rewrite'));
+      dispatch(uiActions.setView('editor'));
     }
   };
 
   const handleBackToOutline = () => {
+    dispatch(uiActions.setView('home'));
   };
 
   // 空状态：没有审查结果

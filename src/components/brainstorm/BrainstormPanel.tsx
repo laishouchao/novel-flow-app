@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Send,
   ArrowLeft,
@@ -9,6 +10,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import Button from '../common/Button';
+import ReactMarkdown from 'react-markdown';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useAppState, useAppDispatch, projectActions } from '../../store';
 import { useToast } from '../common/Toast';
@@ -84,6 +86,7 @@ interface ChatMessage {
 const BrainstormPanel: React.FC = () => {
   const state = useAppState();
   const dispatch = useAppDispatch();
+  const navigate = useNavigate();
   const { addToast } = useToast();
 
   const storeMessages = state.project.brainstormMessages;
@@ -370,6 +373,21 @@ const BrainstormPanel: React.FC = () => {
     }
   };
 
+  // 恢复中断的 AI 调用（切换页面后回来，如果最后一条消息是用户发的，说明 AI 回复被中断）
+  const recoveryDoneRef = useRef(false);
+  useEffect(() => {
+    if (recoveryDoneRef.current) return;
+    recoveryDoneRef.current = true;
+    if (restoredMessages.length > 0) {
+      const lastMsg = restoredMessages[restoredMessages.length - 1];
+      if (lastMsg.role === 'user' && llmConfigured && currentDimension < DIMENSIONS.length - 1) {
+        setTimeout(() => {
+          handleAIResponse(lastMsg.content);
+        }, 100);
+      }
+    }
+  }, [restoredMessages, llmConfigured, currentDimension]);
+
   const handleConfirmPreview = () => {
     if (confirmedProjectData) {
       dispatch(projectActions.update({
@@ -396,6 +414,7 @@ const BrainstormPanel: React.FC = () => {
       };
       dispatch(projectActions.addVolume(defaultVolume));
     }
+    navigate('/');
   };
 
   const handlePrevDimension = () => {
@@ -420,6 +439,7 @@ const BrainstormPanel: React.FC = () => {
         <div className="flex items-center justify-between px-5 py-3">
           <div className="flex items-center gap-3">
             <button
+              onClick={() => navigate('/project')}
               className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
             >
               <ArrowLeft size={18} />
@@ -509,7 +529,18 @@ const BrainstormPanel: React.FC = () => {
                 }
               `}
             >
-              <div className="whitespace-pre-wrap">{msg.content}</div>
+              {msg.role === 'user' ? (
+                <div className="whitespace-pre-wrap">{msg.content}</div>
+              ) : msg.content ? (
+                <div className="brainstorm-markdown prose prose-sm prose-slate max-w-none prose-p:my-1 prose-headings:my-1.5 prose-strong:text-slate-800 prose-strong:font-semibold">
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 py-1">
+                  <LoadingSpinner size="sm" />
+                  <span className="text-xs text-slate-400">AI 思考中...</span>
+                </div>
+              )}
 
               {/* AI选项按钮 */}
               {msg.options && msg.options.length > 0 && (
@@ -534,18 +565,6 @@ const BrainstormPanel: React.FC = () => {
             </div>
           </div>
         ))}
-
-        {/* 加载指示器 */}
-        {isLoading && (
-          <div className="flex gap-3">
-            <div className="shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
-              <Bot size={16} />
-            </div>
-            <div className="bg-slate-50 rounded-2xl rounded-tl-sm px-4 py-3">
-              <LoadingSpinner size="sm" />
-            </div>
-          </div>
-        )}
 
         {/* project.md 预览 */}
         {showPreview && (
@@ -590,6 +609,9 @@ const BrainstormPanel: React.FC = () => {
                   <p className="text-sm font-medium text-amber-800">请先配置 AI 模型</p>
                   <p className="text-xs text-amber-600 mt-0.5">灵感收束需要 AI 模型支持，请前往设置页面配置 API。</p>
                 </div>
+                <Button variant="primary" size="sm" onClick={() => navigate('/settings')}>
+                  前往设置
+                </Button>
               </div>
             )}
             <div className="flex items-center gap-3">

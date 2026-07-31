@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { AppProvider, useAppState, useAppDispatch, uiActions, aiActions, selectWritingProgress } from './store';
+import { AppProvider, useAppState, useAppDispatch, uiActions, selectWritingProgress } from './store';
 import type { ProjectStage } from './types';
 import { llmService } from './services/llm';
 import { countChineseWords } from './utils/wordCount';
@@ -19,8 +19,6 @@ import OutlineToolsPanel from './components/outline/OutlineToolsPanel';
 import PromptManagerPanel from './components/settings/PromptManagerPanel';
 import ExportPanel from './components/export/ExportPanel';
 import { ToastProvider } from './components/common/Toast';
-import NotificationCenter from './components/common/NotificationCenter';
-import { aiPipeline } from './services/aiPipeline';
 import {
   PenLine,
   BookOpen,
@@ -245,18 +243,6 @@ function AppLayout() {
     });
   }, [state.ai.config]);
 
-  // 设置 AI Pipeline 回调，桥接到 store
-  useEffect(() => {
-    aiPipeline.setCallbacks({
-      onGeneratingChange: (isGenerating, task) => {
-        dispatch(aiActions.setGenerating(isGenerating, task));
-      },
-      onStreamToken: (token) => {
-        dispatch(aiActions.streamToken(token));
-      },
-    });
-  }, [dispatch]);
-
   // Sidebar 导航（只有 3 个全局项）
   const currentNav: 'writing' | 'projects' | 'settings' =
     location.pathname.startsWith('/project') ? 'projects' :
@@ -301,7 +287,6 @@ function AppLayout() {
         </Routes>
       </main>
       <CreateProjectDialog />
-      <NotificationCenter />
       </div>
     </div>
   );

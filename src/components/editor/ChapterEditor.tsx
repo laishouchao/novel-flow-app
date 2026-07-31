@@ -21,7 +21,7 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import Button from '../common/Button';
-import { useAppState, useAppDispatch, editorActions, projectActions } from '../../store';
+import { useAppState, useAppDispatch, editorActions, projectActions, uiActions } from '../../store';
 import { useToast } from '../common/Toast';
 import { aiPipeline, type StreamCallback } from '../../services/aiPipeline';
 import { llmService } from '../../services/llm';
@@ -398,6 +398,7 @@ const ChapterEditor: React.FC = () => {
             variant="primary"
             onClick={() => {
               dispatch(projectActions.setStage('outline'));
+              dispatch(uiActions.setView('home'));
             }}
           >
             前往大纲规划

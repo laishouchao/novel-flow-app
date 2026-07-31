@@ -23,11 +23,10 @@ const NotificationCenter: React.FC = () => {
   const [visible, setVisible] = useState<Notification[]>([]);
 
   useEffect(() => {
-    setVisible(notifications.slice(-5)); // 只显示最近5条
+    setVisible(notifications.slice(-5));
   }, [notifications]);
 
   useEffect(() => {
-    // 自动移除有过期时间的通知
     const timers = visible.map((n) => {
       if (n.duration && n.duration > 0) {
         return setTimeout(() => {
@@ -46,7 +45,7 @@ const NotificationCenter: React.FC = () => {
       {visible.map((n) => (
         <div
           key={n.id}
-          className={`flex items-start gap-2 p-3 rounded-lg border shadow-sm animate-slide-in ${bgMap[n.type]}`}
+          className={`flex items-start gap-2 p-3 rounded-lg border shadow-sm ${bgMap[n.type]}`}
         >
           <span className="mt-0.5 shrink-0">{iconMap[n.type]}</span>
           <div className="flex-1 min-w-0">

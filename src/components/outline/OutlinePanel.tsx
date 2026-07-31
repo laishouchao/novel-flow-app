@@ -16,7 +16,7 @@ import {
 import Button from '../common/Button';
 import { StructureBadge } from '../common/Badge';
 import { useToast } from '../common/Toast';
-import { useAppState, useAppDispatch, projectActions, editorActions } from '../../store';
+import { useAppState, useAppDispatch, projectActions, editorActions, uiActions } from '../../store';
 import { aiPipeline } from '../../services/aiPipeline';
 import { hasLLMConfig } from '../../utils/llmHelpers';
 import type { Chapter as StoreChapter, ChapterStructureTag, ChapterStatus as StoreChapterStatus } from '../../types';
@@ -536,6 +536,7 @@ const OutlinePanel: React.FC = () => {
     const chapter = storeChapters.find((ch) => ch.id === chapterId);
     if (chapter) {
       dispatch(editorActions.setChapter(chapter));
+      dispatch(uiActions.setView('editor'));
     }
   };
 

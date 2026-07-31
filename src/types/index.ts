@@ -482,6 +482,53 @@ export type AppView =
   | 'settings';         // 设置
 
 // ============================================================================
+// 文件系统存储（参考 AI_NovelGenerator）
+// ============================================================================
+
+/** 项目文件结构描述 */
+export interface ProjectFileStructure {
+  root: string;
+  architectureFile: string;    // 架构 txt
+  directoryFile: string;       // 目录 txt
+  summaryFile: string;         // 摘要 txt
+  characterStateFile: string;  // 角色状态 txt
+  chaptersDir: string;         // 章节目录
+  canonDir: string;            // canon 日志目录
+}
+
+// ============================================================================
+// 雪花写作法步骤
+// ============================================================================
+
+/** 雪花写作法步骤定义 */
+export type SnowflakeStep =
+  | 'core_seed'           // 核心种子（一句话故事）
+  | 'character_dynamics'  // 角色动力学
+  | 'world_building'      // 世界观构建
+  | 'plot_architecture';  // 情节架构
+
+/** 雪花写作法步骤进度 */
+export interface SnowflakeProgress {
+  step: SnowflakeStep;
+  completed: boolean;
+  output?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+// ============================================================================
+// 导航与路由
+// ============================================================================
+
+/** 路由参数 */
+export interface RouteParams {
+  projectId?: string;
+  volumeId?: string;
+  chapterId?: string;
+  view?: AppView;
+}
+
+// ============================================================================
 // 通知与对话框
 // ============================================================================
 
