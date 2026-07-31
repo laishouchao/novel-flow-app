@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import Button from '../common/Button';
 import LoadingSpinner from '../common/LoadingSpinner';
-import { useAppState, useAppDispatch, projectActions, uiActions } from '../../store';
+import { useAppState, useAppDispatch, projectActions } from '../../store';
 import { useToast } from '../common/Toast';
 import { aiPipeline } from '../../services/aiPipeline';
 import { hasLLMConfig } from '../../utils/llmHelpers';
@@ -396,7 +396,6 @@ const BrainstormPanel: React.FC = () => {
       };
       dispatch(projectActions.addVolume(defaultVolume));
     }
-    dispatch(uiActions.setView('home'));
   };
 
   const handlePrevDimension = () => {
@@ -421,7 +420,6 @@ const BrainstormPanel: React.FC = () => {
         <div className="flex items-center justify-between px-5 py-3">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => dispatch(uiActions.setView('home'))}
               className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
             >
               <ArrowLeft size={18} />
@@ -592,9 +590,6 @@ const BrainstormPanel: React.FC = () => {
                   <p className="text-sm font-medium text-amber-800">请先配置 AI 模型</p>
                   <p className="text-xs text-amber-600 mt-0.5">灵感收束需要 AI 模型支持，请前往设置页面配置 API。</p>
                 </div>
-                <Button variant="primary" size="sm" onClick={() => dispatch(uiActions.setView('settings'))}>
-                  前往设置
-                </Button>
               </div>
             )}
             <div className="flex items-center gap-3">

@@ -153,6 +153,19 @@ export type StreamCallback = (token: string) => void;
 
 export class AIPipeline {
   private llm = llmService;
+  private onGeneratingChange?: (isGenerating: boolean, task?: string) => void;
+  private onStreamToken?: (token: string) => void;
+
+  /**
+   * 设置回调函数，用于桥接 AI Pipeline 的状态到外部 store
+   */
+  setCallbacks(callbacks: {
+    onGeneratingChange?: (isGenerating: boolean, task?: string) => void;
+    onStreamToken?: (token: string) => void;
+  }) {
+    this.onGeneratingChange = callbacks.onGeneratingChange;
+    this.onStreamToken = callbacks.onStreamToken;
+  }
 
   // ============================================================
   // 1. 灵感收束：生成下一个问题
@@ -199,23 +212,29 @@ export class AIPipeline {
 
     // 调用 LLM 流式接口
     let fullContent = '';
-    await this.llm.chatStream(
-      messages,
-      {
-        onToken: (token) => {
-          fullContent += token;
-          onToken(token);
+    this.onGeneratingChange?.(true, 'brainstorm');
+    try {
+      await this.llm.chatStream(
+        messages,
+        {
+          onToken: (token) => {
+            fullContent += token;
+            onToken(token);
+            this.onStreamToken?.(token);
+          },
+          onComplete: (content) => {
+            fullContent = content;
+          },
+          onError: (error) => {
+            console.error('[AIPipeline] 头脑风暴流式错误:', error);
+          },
         },
-        onComplete: (content) => {
-          fullContent = content;
-        },
-        onError: (error) => {
-          console.error('[AIPipeline] 头脑风暴流式错误:', error);
-        },
-      },
-      undefined,
-      'brainstorm'
-    );
+        undefined,
+        'brainstorm'
+      );
+    } finally {
+      this.onGeneratingChange?.(false);
+    }
 
     return fullContent;
   }
@@ -351,23 +370,29 @@ export class AIPipeline {
     // 如果有流式回调，使用流式接口
     if (onStream) {
       let fullContent = '';
-      await this.llm.chatStream(
-        messages,
-        {
-          onToken: (token) => {
-            fullContent += token;
-            onStream(token);
+      this.onGeneratingChange?.(true, 'outline');
+      try {
+        await this.llm.chatStream(
+          messages,
+          {
+            onToken: (token) => {
+              fullContent += token;
+              onStream(token);
+              this.onStreamToken?.(token);
+            },
+            onComplete: (content) => {
+              fullContent = content;
+            },
+            onError: (error) => {
+              console.error('[AIPipeline] 大纲生成流式错误:', error);
+            },
           },
-          onComplete: (content) => {
-            fullContent = content;
-          },
-          onError: (error) => {
-            console.error('[AIPipeline] 大纲生成流式错误:', error);
-          },
-        },
-        undefined,
-        'outline',
-      );
+          undefined,
+          'outline',
+        );
+      } finally {
+        this.onGeneratingChange?.(false);
+      }
       return {
         content: fullContent,
         model: 'streaming',
@@ -475,17 +500,26 @@ export class AIPipeline {
 
     // 流式或非流式调用
     if (onStream) {
-      const fullContent = await this.llm.chatStream(
-        messages,
-        {
-          onToken: onStream,
-          onError: (error) => {
-            console.error('[AIPipeline] 章节写作流式错误:', error);
+      this.onGeneratingChange?.(true, 'draft');
+      let fullContent: string;
+      try {
+        fullContent = await this.llm.chatStream(
+          messages,
+          {
+            onToken: (token) => {
+              onStream(token);
+              this.onStreamToken?.(token);
+            },
+            onError: (error) => {
+              console.error('[AIPipeline] 章节写作流式错误:', error);
+            },
           },
-        },
-        undefined,
-        'draft',
-      );
+          undefined,
+          'draft',
+        );
+      } finally {
+        this.onGeneratingChange?.(false);
+      }
       return fullContent;
     } else {
       const response = await this.llm.chat(messages, undefined, 'draft');
@@ -540,23 +574,29 @@ export class AIPipeline {
     // 如果有流式回调，使用流式接口
     if (onStream) {
       let fullContent = '';
-      await this.llm.chatStream(
-        messages,
-        {
-          onToken: (token) => {
-            fullContent += token;
-            onStream(token);
+      this.onGeneratingChange?.(true, 'review');
+      try {
+        await this.llm.chatStream(
+          messages,
+          {
+            onToken: (token) => {
+              fullContent += token;
+              onStream(token);
+              this.onStreamToken?.(token);
+            },
+            onComplete: (content) => {
+              fullContent = content;
+            },
+            onError: (error) => {
+              console.error('[AIPipeline] 章节审查流式错误:', error);
+            },
           },
-          onComplete: (content) => {
-            fullContent = content;
-          },
-          onError: (error) => {
-            console.error('[AIPipeline] 章节审查流式错误:', error);
-          },
-        },
-        undefined,
-        'review',
-      );
+          undefined,
+          'review',
+        );
+      } finally {
+        this.onGeneratingChange?.(false);
+      }
 
       // 解析审查结果
       const parsedResult = this.parseReviewResult(fullContent, chapter.chapterNumber);

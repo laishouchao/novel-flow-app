@@ -30,15 +30,6 @@ const Card: React.FC<CardProps> = ({
   );
 };
 
-const CardHeader: React.FC<{ children: React.ReactNode; className?: string }> = ({
-  children,
-  className = '',
-}) => (
-  <div className={`px-5 py-4 border-b border-slate-100 ${className}`}>
-    {children}
-  </div>
-);
-
 const CardContent: React.FC<{ children: React.ReactNode; className?: string }> = ({
   children,
   className = '',
@@ -48,14 +39,5 @@ const CardContent: React.FC<{ children: React.ReactNode; className?: string }> =
   </div>
 );
 
-const CardFooter: React.FC<{ children: React.ReactNode; className?: string }> = ({
-  children,
-  className = '',
-}) => (
-  <div className={`px-5 py-3 border-t border-slate-100 bg-slate-50/50 rounded-b-xl ${className}`}>
-    {children}
-  </div>
-);
-
-export { CardHeader, CardContent, CardFooter };
+export { CardContent };
 export default Card;

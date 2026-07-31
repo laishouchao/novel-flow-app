@@ -11,7 +11,7 @@ import {
   Sparkles,
   Settings,
 } from 'lucide-react';
-import { useAppState, useAppDispatch, editorActions, uiActions } from '../../store';
+import { useAppState, useAppDispatch, editorActions } from '../../store';
 
 interface FileItem {
   id: string;
@@ -141,7 +141,6 @@ const ProjectFilePanel: React.FC<ProjectFilePanelProps> = ({ isOpen, onToggle })
     const chapter = state.project.chapters.find(ch => ch.id === item.id);
     if (chapter) {
       dispatch(editorActions.setChapter(chapter));
-      dispatch(uiActions.setView('editor'));
     }
   };
 

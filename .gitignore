@@ -33,3 +33,13 @@ src-tauri/Cargo.lock
 # Temp
 *.tmp
 *.bak
+*.zip
+
+# CodeGraph
+.codegraph/
+
+# TRAE temp
+.trae-html-share-packages/
+
+# Audit reports
+code-audit-report/

@@ -23,7 +23,6 @@ import type {
   ProjectStatus,
   ProjectStage,
   ChapterStatus,
-  AppView,
   EditorViewMode,
   SidebarPanel,
   Notification,
@@ -103,8 +102,6 @@ export interface AIState {
 
 /** UI 状态域 */
 export interface UIState {
-  /** 当前视图 */
-  currentView: AppView;
   /** 侧边栏是否展开 */
   sidebarOpen: boolean;
   /** 侧边栏当前面板 */
@@ -214,7 +211,6 @@ export type AIAction =
 // ---- UI Actions ----
 
 export type UIAction =
-  | { type: 'UI_SET_VIEW'; payload: AppView }
   | { type: 'UI_TOGGLE_SIDEBAR' }
   | { type: 'UI_SET_SIDEBAR_OPEN'; payload: boolean }
   | { type: 'UI_SET_SIDEBAR_PANEL'; payload: SidebarPanel }
@@ -272,7 +268,6 @@ const initialAIState: AIState = {
 };
 
 const initialUIState: UIState = {
-  currentView: 'home',
   sidebarOpen: true,
   sidebarPanel: 'chapters',
   dialog: { type: null, open: false },
@@ -858,9 +853,6 @@ function aiReducer(state: AIState, action: AIAction): AIState {
 
 function uiReducer(state: UIState, action: UIAction): UIState {
   switch (action.type) {
-    case 'UI_SET_VIEW':
-      return { ...state, currentView: action.payload };
-
     case 'UI_TOGGLE_SIDEBAR':
       return { ...state, sidebarOpen: !state.sidebarOpen };
 
@@ -1311,8 +1303,6 @@ export const aiActions = {
 // ---- UI Action Creators ----
 
 export const uiActions = {
-  setView: (view: AppView) =>
-    domainAction('ui', { type: 'UI_SET_VIEW', payload: view }),
   toggleSidebar: () =>
     domainAction('ui', { type: 'UI_TOGGLE_SIDEBAR' }),
   setSidebarOpen: (open: boolean) =>
@@ -1341,66 +1331,10 @@ export const uiActions = {
 // 选择器（Selectors）- 用于从状态中提取派生数据
 // ============================================================================
 
-/** 获取当前项目的卷（按卷号排序） */
-export function selectSortedVolumes(state: AppState): Volume[] {
-  return [...state.project.volumes].sort((a, b) => a.volumeNumber - b.volumeNumber);
-}
-
-/** 获取当前项目指定卷的章节（按章节号排序） */
-export function selectChaptersByVolume(state: AppState, volumeNumber: number): Chapter[] {
-  return state.project.chapters
-    .filter((c) => c.volumeNumber === volumeNumber)
-    .sort((a, b) => a.chapterNumber - b.chapterNumber);
-}
-
-/** 获取当前项目的主要角色（主角 + 配角 + 反派） */
-export function selectMainCharacters(state: AppState): Character[] {
-  return state.project.characters.filter(
-    (c) => c.role === 'protagonist' || c.role === 'supporting' || c.role === 'antagonist'
-  );
-}
-
 /** 获取当前项目的写作进度百分比 */
 export function selectWritingProgress(state: AppState): number {
   const project = state.project.currentProject;
   if (!project || project.targetWords === 0) return 0;
   const totalWords = state.project.chapters.reduce((sum, c) => sum + c.wordCount, 0);
   return Math.min(100, Math.round((totalWords / project.targetWords) * 100));
-}
-
-/** 获取当前项目各状态的章节统计 */
-export function selectChapterStatusCounts(
-  state: AppState
-): Record<ChapterStatus, number> {
-  const counts: Record<ChapterStatus, number> = {
-    pending: 0,
-    drafting: 0,
-    reviewing: 0,
-    minor_fix: 0,
-    rewrite: 0,
-    done: 0,
-    rejected: 0,
-  };
-  for (const chapter of state.project.chapters) {
-    counts[chapter.status]++;
-  }
-  return counts;
-}
-
-/** 检查当前项目是否有未保存的更改 */
-export function selectHasUnsavedChanges(state: AppState): boolean {
-  return state.editor.isDirty;
-}
-
-/** 获取当前正在进行的任务信息 */
-export function selectActiveTask(state: AppState): {
-  isGenerating: boolean;
-  task: string | null;
-  streamBuffer: string;
-} {
-  return {
-    isGenerating: state.ai.isGenerating,
-    task: state.ai.generatingTask,
-    streamBuffer: state.ai.streamBuffer,
-  };
 }

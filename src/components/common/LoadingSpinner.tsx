@@ -44,20 +44,4 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
   );
 };
 
-/** 全屏加载遮罩 */
-export const FullPageLoader: React.FC<{ text?: string }> = ({ text = '加载中...' }) => {
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-white/80 backdrop-blur-sm">
-      <LoadingSpinner size="lg" text={text} />
-    </div>
-  );
-};
-
-/** 内联骨架屏 */
-export const Skeleton: React.FC<{ className?: string }> = ({ className = '' }) => {
-  return (
-    <div className={`animate-pulse rounded-md bg-slate-200 ${className}`} />
-  );
-};
-
 export default LoadingSpinner;

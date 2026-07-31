@@ -74,7 +74,6 @@ const ProjectList: React.FC = () => {
     // 切换项目时重置编辑器和UI状态，避免显示其他项目的内容
     dispatch(editorActions.setContent(''));
     dispatch(editorActions.setChapter(null));
-    dispatch(uiActions.setView('home'));
 
     // 先设置当前项目（显示加载状态）
     dispatch(projectActions.setCurrent(novelProject));
