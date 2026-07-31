@@ -34,15 +34,15 @@ import {
 // 辅助函数
 // ============================================================================
 
-/** 根据项目阶段计算当前步骤 (1-5) */
+/** 根据项目阶段计算当前步骤 (0-indexed, 与 StepProgressBar 的 index 对应) */
 function getStepFromStage(stage?: ProjectStage): number {
   switch (stage) {
-    case 'brainstorm': return 1;
-    case 'outline': return 2;
-    case 'draft': return 3;
-    case 'review': return 4;
-    case 'update': return 5;
-    default: return 1;
+    case 'brainstorm': return 0;
+    case 'outline': return 1;
+    case 'draft': return 2;
+    case 'review': return 3;
+    case 'update': return 4;
+    default: return 0;
   }
 }
 

@@ -39,7 +39,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   collapsed = false,
   onToggleCollapse,
   projectInfo,
-  currentStep = 2,
+  currentStep = 0,
 }) => {
   return (
     <aside
