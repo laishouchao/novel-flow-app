@@ -1,18 +1,19 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/tauri';
 import {
   Settings,
   Key,
   Palette,
   Type,
-  Plus,
-  Trash2,
-  Edit3,
   Wifi,
   WifiOff,
   Sun,
   Moon,
   Save,
-  Zap,
+  Shield,
+  Server,
+  Cpu,
+  RefreshCw,
 } from 'lucide-react';
 import Button from '../common/Button';
 import Card, { CardContent } from '../common/Card';
@@ -22,32 +23,16 @@ import { useToast } from '../common/Toast';
 import { llmService } from '../../services/llm';
 import type { LLMServiceConfig } from '../../services/llm';
 import type {
-  LLMConfig as StoreLLMConfig,
-  TaskModelAssignment as StoreTaskAssignment,
+  AuthorizationConfig,
   PresetStyle,
   NovelStyle,
-  AppConfig,
-  LLMInterfaceFormat,
 } from '../../types';
 
 // ============================================================================
-// 组件内部类型（与 store 类型做映射）
+// 组件内部类型
 // ============================================================================
 
 type SettingsTab = 'api' | 'style' | 'editor';
-
-/** 组件内部使用的 LLM 配置（provider 字段对应 store 的 interfaceFormat） */
-interface LocalLLMConfig {
-  id: string;
-  name: string;
-  provider: string;
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  temperature: number;
-  maxTokens: number;
-  timeout?: number;
-}
 
 interface StylePreset {
   id: PresetStyle;
@@ -56,32 +41,18 @@ interface StylePreset {
   features: string[];
 }
 
-interface EditorPreferences {
-  fontSize: number;
-  lineHeight: number;
-  autoSaveInterval: number;
-  theme: 'light' | 'dark';
+/** API 返回的模型列表项 */
+interface ModelInfo {
+  id: string;
+  object?: string;
+  owned_by?: string;
 }
 
 // ============================================================================
 // 常量
 // ============================================================================
 
-const defaultAppConfig: AppConfig = {
-  llmConfigs: [],
-  taskAssignment: {
-    brainstorm: '',
-    outline: '',
-    draft: '',
-    review: '',
-    finalization: '',
-    summary: '',
-  },
-  defaultStyle: 'cold_realism',
-  customStyles: [],
-  proxySetting: { enabled: false },
-  recentProjects: [],
-};
+const DEFAULT_PROXY_URL = 'http://model.mify.ai.srv/v1/';
 
 const stylePresets: StylePreset[] = [
   {
@@ -104,49 +75,6 @@ const stylePresets: StylePreset[] = [
   },
 ];
 
-const taskLabels: { key: keyof StoreTaskAssignment; label: string }[] = [
-  { key: 'brainstorm', label: '灵感收束' },
-  { key: 'outline', label: '大纲生成' },
-  { key: 'draft', label: '草稿生成' },
-  { key: 'review', label: '章节审查' },
-  { key: 'finalization', label: '定稿润色' },
-  { key: 'summary', label: '摘要生成' },
-];
-
-// ============================================================================
-// 类型映射工具函数
-// ============================================================================
-
-/** Store LLMConfig -> 组件内部 LocalLLMConfig */
-function storeToLocal(storeConfig: StoreLLMConfig): LocalLLMConfig {
-  return {
-    id: storeConfig.id,
-    name: storeConfig.name,
-    provider: storeConfig.interfaceFormat,
-    apiKey: storeConfig.apiKey,
-    baseUrl: storeConfig.baseUrl,
-    model: storeConfig.model,
-    temperature: storeConfig.temperature,
-    maxTokens: storeConfig.maxTokens,
-    timeout: storeConfig.timeout,
-  };
-}
-
-/** 组件内部 LocalLLMConfig -> Store LLMConfig */
-function localToStore(localConfig: LocalLLMConfig): StoreLLMConfig {
-  return {
-    id: localConfig.id,
-    name: localConfig.name,
-    interfaceFormat: localConfig.provider as LLMInterfaceFormat,
-    apiKey: localConfig.apiKey,
-    baseUrl: localConfig.baseUrl,
-    model: localConfig.model,
-    maxTokens: localConfig.maxTokens,
-    temperature: localConfig.temperature,
-    timeout: localConfig.timeout ?? 300000,
-  };
-}
-
 // ============================================================================
 // 组件
 // ============================================================================
@@ -156,110 +84,187 @@ const SettingsPanel: React.FC = () => {
   const dispatch = useAppDispatch();
   const { addToast } = useToast();
 
-  const config: AppConfig = state.ai.config ?? defaultAppConfig;
+  const config = state.ai.config;
 
   // ---- 本地状态 ----
   const [activeTab, setActiveTab] = useState<SettingsTab>('api');
-  const [editingConfig, setEditingConfig] = useState<LocalLLMConfig | null>(null);
-  const [isNewConfig, setIsNewConfig] = useState(false);
-  const [testingId, setTestingId] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, 'success' | 'fail'>>({});
-  const [testErrorDetails, setTestErrorDetails] = useState<Record<string, string>>({});
 
-  const [editorPrefs, setEditorPrefs] = useState<EditorPreferences>(state.ui.editorPrefs);
+  // 授权码配置本地状态
+  const savedAuth = config?.authConfig;
+  const [authCode, setAuthCode] = useState(savedAuth?.authCode ?? '');
+  const [proxyBaseUrl, setProxyBaseUrl] = useState(savedAuth?.proxyBaseUrl ?? DEFAULT_PROXY_URL);
+  const [selectedModel, setSelectedModel] = useState(savedAuth?.selectedModel ?? '');
+  const [temperature, setTemperature] = useState(savedAuth?.temperature ?? 0.7);
+  const [maxTokens, setMaxTokens] = useState(savedAuth?.maxTokens ?? 4096);
 
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<'success' | 'fail' | null>(null);
+  const [testError, setTestError] = useState('');
+
+  // 可用模型列表
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+
+  const [editorPrefs, setEditorPrefs] = useState(state.ui.editorPrefs);
   const [customStyleName, setCustomStyleName] = useState('');
   const [customStyleDesc, setCustomStyleDesc] = useState('');
 
-  // ---- 确保 config 存在（首次访问设置时初始化） ----
+  // ---- 同步 store 中的 authConfig 到本地 ----
   useEffect(() => {
-    if (!state.ai.config) {
-      dispatch(aiActions.setConfig(defaultAppConfig));
+    if (savedAuth) {
+      setAuthCode(savedAuth.authCode);
+      setProxyBaseUrl(savedAuth.proxyBaseUrl);
+      setSelectedModel(savedAuth.selectedModel);
+      setTemperature(savedAuth.temperature);
+      setMaxTokens(savedAuth.maxTokens);
     }
-  }, [state.ai.config, dispatch]);
+  }, [savedAuth]);
 
-  // ---- LLM 配置操作 ----
-
-  const handleAddConfig = useCallback(() => {
-    const newConfig: LocalLLMConfig = {
-      id: `cfg-${Date.now()}`,
-      name: '新配置',
-      provider: 'openai',
-      apiKey: '',
-      baseUrl: 'https://api.openai.com/v1',
-      model: 'gpt-4o',
-      temperature: 0.7,
-      maxTokens: 4096,
-    };
-    setEditingConfig(newConfig);
-    setIsNewConfig(true);
-  }, []);
-
-  const handleEditConfig = useCallback((storeConfig: StoreLLMConfig) => {
-    setEditingConfig(storeToLocal(storeConfig));
-    setIsNewConfig(false);
-  }, []);
-
-  const handleDeleteConfig = useCallback((id: string) => {
-    dispatch(aiActions.deleteLLMConfig(id));
-  }, [dispatch]);
-
-  const handleSaveConfig = useCallback(() => {
-    if (!editingConfig) return;
-    const storeConfig = localToStore(editingConfig);
-    if (isNewConfig) {
-      dispatch(aiActions.addLLMConfig(storeConfig));
-    } else {
-      dispatch(aiActions.updateLLMConfig(storeConfig.id, storeConfig));
-    }
-    setEditingConfig(null);
-    setIsNewConfig(false);
-    addToast('success', isNewConfig ? '配置已添加' : '配置已更新');
-  }, [editingConfig, isNewConfig, dispatch, addToast]);
-
-  const handleTestConnection = useCallback(async (storeConfig: StoreLLMConfig) => {
-    setTestingId(storeConfig.id);
-    const serviceConfig: LLMServiceConfig = {
-      baseUrl: storeConfig.baseUrl,
-      apiKey: storeConfig.apiKey,
-      model: storeConfig.model,
-      maxTokens: 20,
-      temperature: storeConfig.temperature,
-      timeout: 15000,
-    };
+  // ---- 从代理 API 获取可用模型列表 ----
+  const handleFetchModels = useCallback(async () => {
+    const url = (proxyBaseUrl.trim() || DEFAULT_PROXY_URL).replace(/\/+$/, '');
+    setLoadingModels(true);
     try {
-      const result = await llmService.testConnection(serviceConfig);
-      setTestResults((prev) => ({ ...prev, [storeConfig.id]: result.success ? 'success' : 'fail' }));
-      if (result.success) {
-        addToast('success', '连接成功');
-        setTestErrorDetails((prev) => ({ ...prev, [storeConfig.id]: '' }));
-      } else {
-        addToast('error', `连接失败: ${result.error || '请检查 API Key 和 URL 是否正确'}`);
-        if (result.details) {
-          setTestErrorDetails((prev) => ({ ...prev, [storeConfig.id]: result.details! }));
-          console.error('[TestConnection] 详细错误:', result.details);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (authCode.trim()) {
+        headers['Authorization'] = `Bearer ${authCode.trim()}`;
+      }
+
+      const response = await invoke<{
+        status: number;
+        status_text: string;
+        headers: Record<string, string>;
+        body: string;
+      }>('http_request', {
+        request: {
+          url: `${url}/models`,
+          method: 'GET',
+          headers,
+          body: '',
+          timeout_secs: 15,
+        },
+      });
+
+      if (response.status >= 200 && response.status < 300) {
+        const data = JSON.parse(response.body);
+        const models: ModelInfo[] = data.data ?? [];
+        setAvailableModels(models);
+        if (models.length > 0) {
+          addToast('success', `获取到 ${models.length} 个可用模型`);
+        } else {
+          addToast('warning', 'API 返回了空的模型列表');
         }
+      } else {
+        addToast('error', `获取模型列表失败: HTTP ${response.status}`);
       }
     } catch (error) {
-      setTestResults((prev) => ({ ...prev, [storeConfig.id]: 'fail' }));
+      addToast('error', `获取模型列表失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setLoadingModels(false);
+    }
+  }, [proxyBaseUrl, authCode, addToast]);
+
+  // ---- 保存授权码配置 ----
+  const handleSaveAuth = useCallback(() => {
+    if (!authCode.trim()) {
+      addToast('warning', '请填写授权码');
+      return;
+    }
+    if (!selectedModel.trim()) {
+      addToast('warning', '请选择或填写模型名称');
+      return;
+    }
+
+    const authConfig: AuthorizationConfig = {
+      authCode: authCode.trim(),
+      proxyBaseUrl: proxyBaseUrl.trim() || DEFAULT_PROXY_URL,
+      selectedModel: selectedModel.trim(),
+      temperature,
+      maxTokens,
+    };
+
+    dispatch(aiActions.updateConfig({ authConfig }));
+
+    // 同时生成一个对应的 LLMConfig，确保下游 AI 调用正常工作
+    const llmConfig = {
+      id: 'auth-default',
+      name: '代理模型',
+      interfaceFormat: 'openai' as const,
+      apiKey: authConfig.authCode,
+      baseUrl: authConfig.proxyBaseUrl,
+      model: authConfig.selectedModel,
+      maxTokens: authConfig.maxTokens,
+      temperature: authConfig.temperature,
+      timeout: 300000,
+    };
+
+    // 更新或添加 LLM 配置
+    const existingIdx = config?.llmConfigs.findIndex((c) => c.id === 'auth-default') ?? -1;
+    if (existingIdx >= 0) {
+      dispatch(aiActions.updateLLMConfig('auth-default', llmConfig));
+    } else {
+      dispatch(aiActions.addLLMConfig(llmConfig));
+    }
+
+    // 自动指派所有任务到此配置
+    dispatch(aiActions.setTaskAssignment({
+      brainstorm: 'auth-default',
+      outline: 'auth-default',
+      draft: 'auth-default',
+      review: 'auth-default',
+      finalization: 'auth-default',
+      summary: 'auth-default',
+    }));
+
+    addToast('success', '配置已保存');
+  }, [authCode, proxyBaseUrl, selectedModel, temperature, maxTokens, config?.llmConfigs, dispatch, addToast]);
+
+  // ---- 测试连接 ----
+  const handleTestConnection = useCallback(async () => {
+    if (!authCode.trim()) {
+      addToast('warning', '请先填写授权码');
+      return;
+    }
+    if (!selectedModel.trim()) {
+      addToast('warning', '请先选择或填写模型名称');
+      return;
+    }
+
+    setTesting(true);
+    setTestResult(null);
+    setTestError('');
+
+    const serviceConfig: LLMServiceConfig = {
+      baseUrl: proxyBaseUrl.trim() || DEFAULT_PROXY_URL,
+      apiKey: authCode.trim(),
+      model: selectedModel.trim(),
+      maxTokens: 150,
+      temperature,
+      timeout: 15000,
+    };
+
+    try {
+      const result = await llmService.testConnection(serviceConfig);
+      if (result.success) {
+        setTestResult('success');
+        addToast('success', '连接成功');
+      } else {
+        setTestResult('fail');
+        setTestError(result.details || result.error || '连接失败');
+        addToast('error', `连接失败: ${result.error || '请检查授权码和模型名称'}`);
+      }
+    } catch (error) {
+      setTestResult('fail');
+      setTestError(error instanceof Error ? error.message : '未知错误');
       addToast('error', `连接失败: ${error instanceof Error ? error.message : '未知错误'}`);
     } finally {
-      setTestingId(null);
+      setTesting(false);
     }
-  }, [addToast]);
-
-  // ---- 任务指派操作 ----
-
-  const handleTaskAssignmentChange = useCallback((task: keyof StoreTaskAssignment, configId: string) => {
-    const updated: StoreTaskAssignment = {
-      ...config.taskAssignment,
-      [task]: configId,
-    };
-    dispatch(aiActions.setTaskAssignment(updated));
-  }, [config.taskAssignment, dispatch]);
+  }, [authCode, proxyBaseUrl, selectedModel, temperature, addToast]);
 
   // ---- 风格操作 ----
-
   const handleSelectPresetStyle = useCallback((preset: PresetStyle) => {
     dispatch(aiActions.setDefaultStyle(preset));
     addToast('success', '默认风格已切换');
@@ -288,14 +293,12 @@ const SettingsPanel: React.FC = () => {
   }, [customStyleName, customStyleDesc, dispatch, addToast]);
 
   // ---- 编辑器偏好操作 ----
-
   const handleSaveEditorPrefs = useCallback(() => {
     dispatch(uiActions.setEditorPrefs(editorPrefs));
     addToast('success', '设置已保存');
   }, [dispatch, addToast, editorPrefs]);
 
   // ---- Tab 定义 ----
-
   const tabs: { key: SettingsTab; label: string; icon: React.ReactNode }[] = [
     { key: 'api', label: 'API 配置', icon: <Key size={16} /> },
     { key: 'style', label: '风格管理', icon: <Palette size={16} /> },
@@ -303,303 +306,191 @@ const SettingsPanel: React.FC = () => {
   ];
 
   // ============================================================================
-  // 渲染：API 配置 Tab
+  // 渲染：API 配置 Tab（简化版：授权码 + 代理 + 模型选择）
   // ============================================================================
 
   const renderAPITab = () => (
     <div className="space-y-6">
-      {/* LLM 配置列表 */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-slate-700">LLM 配置</h3>
-          <Button size="sm" icon={<Plus size={14} />} onClick={handleAddConfig}>
-            添加配置
-          </Button>
-        </div>
+      {/* 授权码配置卡片 */}
+      <Card>
+        <CardContent className="p-5 space-y-5">
+          <div className="flex items-center gap-2 mb-1">
+            <Shield size={18} className="text-blue-600" />
+            <h3 className="text-sm font-semibold text-slate-700">AI 接入配置</h3>
+          </div>
+          <p className="text-xs text-slate-400">
+            填写授权码并选择模型即可使用所有 AI 功能。所有请求通过统一代理服务转发。
+          </p>
 
-        {/* 配置卡片列表 */}
-        <div className="space-y-3">
-          {config.llmConfigs.map((storeCfg) => {
-            const localCfg = storeToLocal(storeCfg);
-            return (
-              <Card key={storeCfg.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2">
-                        <h4 className="text-sm font-semibold text-slate-800">
-                          {localCfg.name}
-                        </h4>
-                        <Badge variant="outline">{localCfg.provider}</Badge>
-                        {testResults[storeCfg.id] === 'success' && (
-                          <Badge variant="success">已连接</Badge>
-                        )}
-                        {testResults[storeCfg.id] === 'fail' && (
-                          <Badge variant="danger">连接失败</Badge>
-                        )}
-                      </div>
-                      {testResults[storeCfg.id] === 'fail' && testErrorDetails[storeCfg.id] && (
-                        <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700 font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
-                          {testErrorDetails[storeCfg.id]}
-                        </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-500">
-                        <div>
-                          <span className="text-slate-400">模型：</span>
-                          {localCfg.model}
-                        </div>
-                        <div>
-                          <span className="text-slate-400">温度：</span>
-                          {localCfg.temperature}
-                        </div>
-                        <div>
-                          <span className="text-slate-400">Base URL：</span>
-                          <span className="truncate">{localCfg.baseUrl}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-400">最大Token：</span>
-                          {localCfg.maxTokens}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 ml-4">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleTestConnection(storeCfg)}
-                        loading={testingId === storeCfg.id}
-                        icon={
-                          testingId === storeCfg.id
-                            ? undefined
-                            : testResults[storeCfg.id] === 'success'
-                              ? <Wifi size={14} className="text-emerald-500" />
-                              : <WifiOff size={14} />
-                        }
-                      >
-                        测试
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleEditConfig(storeCfg)}
-                        icon={<Edit3 size={14} />}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteConfig(storeCfg.id)}
-                        icon={<Trash2 size={14} />}
-                        className="text-slate-400 hover:text-red-500"
-                      >
-                        删除
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-          {config.llmConfigs.length === 0 && (
-            <div className="text-center py-8 text-sm text-slate-400">
-              暂无 LLM 配置，点击上方"添加配置"开始
-            </div>
-          )}
-        </div>
-      </div>
+          {/* 授权码 */}
+          <div>
+            <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 mb-1.5">
+              <Key size={12} />
+              授权码
+            </label>
+            <input
+              type="password"
+              value={authCode}
+              onChange={(e) => setAuthCode(e.target.value)}
+              placeholder="输入你的授权码"
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                         placeholder:text-slate-400"
+            />
+          </div>
 
-      {/* 编辑/新建配置对话框（内联） */}
-      {editingConfig && (
-        <Card className="border-blue-200 bg-blue-50/30">
-          <CardContent className="p-4">
-            <h4 className="text-sm font-semibold text-slate-700 mb-4">
-              {isNewConfig ? '新建 LLM 配置' : '编辑配置'}
-            </h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  配置名称
-                </label>
-                <input
-                  type="text"
-                  value={editingConfig.name}
-                  onChange={(e) =>
-                    setEditingConfig({ ...editingConfig, name: e.target.value })
-                  }
-                  className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  接口格式
-                </label>
-                <select
-                  value={editingConfig.provider}
-                  onChange={(e) =>
-                    setEditingConfig({
-                      ...editingConfig,
-                      provider: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="openai">OpenAI</option>
-                  <option value="claude">Anthropic (Claude)</option>
-                  <option value="ollama">Ollama</option>
-                  <option value="gemini">Gemini</option>
-                  <option value="custom">自定义</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  API Key
-                </label>
-                <input
-                  type="password"
-                  value={editingConfig.apiKey}
-                  onChange={(e) =>
-                    setEditingConfig({
-                      ...editingConfig,
-                      apiKey: e.target.value,
-                    })
-                  }
-                  placeholder="sk-..."
-                  className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-                             placeholder:text-slate-400"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  Base URL
-                </label>
-                <input
-                  type="text"
-                  value={editingConfig.baseUrl}
-                  onChange={(e) =>
-                    setEditingConfig({
-                      ...editingConfig,
-                      baseUrl: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  模型
-                </label>
-                <input
-                  type="text"
-                  value={editingConfig.model}
-                  onChange={(e) =>
-                    setEditingConfig({
-                      ...editingConfig,
-                      model: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    温度
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="2"
-                    value={editingConfig.temperature}
-                    onChange={(e) =>
-                      setEditingConfig({
-                        ...editingConfig,
-                        temperature: Number(e.target.value),
-                      })
-                    }
-                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm
-                               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    最大Token
-                  </label>
-                  <input
-                    type="number"
-                    step="256"
-                    value={editingConfig.maxTokens}
-                    onChange={(e) =>
-                      setEditingConfig({
-                        ...editingConfig,
-                        maxTokens: Number(e.target.value),
-                      })
-                    }
-                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm
-                               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setEditingConfig(null);
-                  setIsNewConfig(false);
-                }}
-              >
-                取消
-              </Button>
-              <Button variant="primary" size="sm" onClick={handleSaveConfig}>
-                保存
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+          {/* 代理地址 */}
+          <div>
+            <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 mb-1.5">
+              <Server size={12} />
+              代理地址
+            </label>
+            <input
+              type="text"
+              value={proxyBaseUrl}
+              onChange={(e) => setProxyBaseUrl(e.target.value)}
+              placeholder={DEFAULT_PROXY_URL}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-mono
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                         placeholder:text-slate-400"
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              默认：{DEFAULT_PROXY_URL}
+            </p>
+          </div>
 
-      {/* 分任务模型指派 */}
-      <div>
-        <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
-          <Zap size={16} className="text-blue-600" />
-          分任务模型指派
-        </h3>
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          {taskLabels.map(({ key, label }) => (
-            <div
-              key={key}
-              className="flex flex-col gap-1.5 p-3 rounded-lg border border-slate-200 bg-white"
-            >
-              <label className="text-xs font-medium text-slate-600">
-                {label}
-              </label>
+          {/* 模型选择 */}
+          <div>
+            <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 mb-1.5">
+              <Cpu size={12} />
+              模型
+            </label>
+            <div className="flex gap-2">
               <select
-                value={config.taskAssignment[key]}
-                onChange={(e) =>
-                  handleTaskAssignmentChange(key, e.target.value)
-                }
-                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm
-                           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                           bg-white"
               >
-                <option value="">未指定</option>
-                {config.llmConfigs.map((cfg) => (
-                  <option key={cfg.id} value={cfg.id}>
-                    {cfg.name}
+                <option value="">
+                  {availableModels.length > 0 ? '请选择模型' : '点击右侧按钮获取模型列表'}
+                </option>
+                {availableModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.id}
                   </option>
                 ))}
               </select>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleFetchModels}
+                loading={loadingModels}
+                icon={<RefreshCw size={14} className={loadingModels ? 'animate-spin' : ''} />}
+                className="shrink-0"
+              >
+                获取列表
+              </Button>
             </div>
-          ))}
-        </div>
-      </div>
+            {/* 手动输入 */}
+            <input
+              type="text"
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              placeholder="或手动输入模型名称，格式：provider/model（如 xiaomi/mimo-v2.5-pro）"
+              className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-300 text-sm font-mono
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                         placeholder:text-slate-400"
+            />
+          </div>
+
+          {/* 温度和最大 Token */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                温度 (Temperature)
+              </label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="2"
+                value={temperature}
+                onChange={(e) => setTemperature(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-slate-400 mt-1">0-2，越高越随机</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                最大输出 Token
+              </label>
+              <input
+                type="number"
+                step="256"
+                min="256"
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-slate-400 mt-1">单次最大生成量</p>
+            </div>
+          </div>
+
+          {/* 操作按钮 */}
+          <div className="flex items-center gap-3 pt-2">
+            <Button
+              variant="primary"
+              icon={<Save size={14} />}
+              onClick={handleSaveAuth}
+            >
+              保存配置
+            </Button>
+            <Button
+              variant="ghost"
+              icon={
+                testing ? undefined :
+                testResult === 'success' ? <Wifi size={14} className="text-emerald-500" /> :
+                testResult === 'fail' ? <WifiOff size={14} className="text-red-500" /> :
+                <Wifi size={14} />
+              }
+              loading={testing}
+              onClick={handleTestConnection}
+            >
+              测试连接
+            </Button>
+            {testResult === 'success' && (
+              <Badge variant="success">连接成功</Badge>
+            )}
+            {testResult === 'fail' && (
+              <Badge variant="danger">连接失败</Badge>
+            )}
+          </div>
+
+          {/* 测试错误详情 */}
+          {testResult === 'fail' && testError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto">
+              {testError}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 使用说明 */}
+      <Card>
+        <CardContent className="p-5">
+          <h3 className="text-sm font-semibold text-slate-700 mb-3">使用说明</h3>
+          <div className="space-y-2 text-xs text-slate-500 leading-relaxed">
+            <p>1. 填写授权码后，点击「获取列表」自动拉取该账号可用的模型列表</p>
+            <p>2. 从下拉框选择模型，或手动输入 <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-700">provider/model</code> 格式的模型名称</p>
+            <p>3. 点击「测试连接」验证配置是否正确</p>
+            <p>4. 确认无误后点击「保存配置」，系统将自动完成所有任务的模型指派</p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 
@@ -614,7 +505,7 @@ const SettingsPanel: React.FC = () => {
         <h3 className="text-sm font-semibold text-slate-700 mb-4">预设风格</h3>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {stylePresets.map((preset) => {
-            const isSelected = config.defaultStyle === preset.id;
+            const isSelected = config?.defaultStyle === preset.id;
             return (
               <Card
                 key={preset.id}
@@ -647,7 +538,7 @@ const SettingsPanel: React.FC = () => {
       </div>
 
       {/* 自定义风格列表 */}
-      {config.customStyles.length > 0 && (
+      {config?.customStyles && config.customStyles.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-slate-700 mb-4">已保存的自定义风格</h3>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
