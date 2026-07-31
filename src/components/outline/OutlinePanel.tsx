@@ -30,7 +30,7 @@ type StructureType = 'setup' | 'build' | 'climax' | 'fallout';
  */
 function parseChaptersFromContent(content: string): { title: string; task: string }[] {
   const lines = content.split('\n');
-  const chapters: { title: string; task: string }[] = [];
+  const rawChapters: { title: string; taskLines: string[] }[] = [];
   
   // 定义章节匹配模式（按优先级排列）
   const chapterPatterns = [
@@ -49,7 +49,49 @@ function parseChaptersFromContent(content: string): { title: string; task: strin
     /^\d+[.、)]\s+(.{4,})/,
   ];
   
-  let currentChapter: { title: string; taskLines: string[] } | null = null;
+  /**
+   * 从标题行中提取标准化的章节号（如 "第一章"、"第二章"）
+   * 用于去重判断
+   */
+  const extractChapterKey = (line: string): string => {
+    const cleanLine = line.replace(/\*{1,2}/g, '').trim();
+    const match = cleanLine.match(/(第[一二三四五六七八九十百千\d壹贰叁肆伍陆柒捌玖拾佰仟]+章)/);
+    return match ? match[1] : '';
+  };
+
+  /**
+   * 比较两个标题是否指向同一章节（用于去重）
+   * 策略：
+   * 1. 如果都有章节号且相同 → 重复
+   * 2. 如果标题文本相似度 > 60% → 重复
+   */
+  const isDuplicate = (titleA: string, titleB: string, lineA: string, lineB: string): boolean => {
+    const keyA = extractChapterKey(lineA);
+    const keyB = extractChapterKey(lineB);
+    // 策略1：都有章节号且相同
+    if (keyA && keyB && keyA === keyB) return true;
+    // 策略2：标题文本高度相似（简单的包含关系）
+    const tA = titleA.replace(/\s+/g, '');
+    const tB = titleB.replace(/\s+/g, '');
+    if (tA.length > 2 && tB.length > 2) {
+      if (tA.includes(tB) || tB.includes(tA)) return true;
+      // 简单 Jaccard 相似度（按字符 bigram）
+      const bigrams = (s: string) => {
+        const set = new Set<string>();
+        for (let i = 0; i < s.length - 1; i++) set.add(s.substring(i, i + 2));
+        return set;
+      };
+      const setA = bigrams(tA);
+      const setB = bigrams(tB);
+      let intersection = 0;
+      for (const bg of setA) { if (setB.has(bg)) intersection++; }
+      const union = setA.size + setB.size - intersection;
+      if (union > 0 && intersection / union > 0.6) return true;
+    }
+    return false;
+  };
+  
+  let currentChapter: { title: string; taskLines: string[]; rawLine: string } | null = null;
   
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -62,13 +104,6 @@ function parseChaptersFromContent(content: string): { title: string; task: strin
     for (const pattern of chapterPatterns) {
       const match = cleanLine.match(pattern);
       if (match) {
-        // 保存上一个章节
-        if (currentChapter) {
-          chapters.push({
-            title: currentChapter.title,
-            task: currentChapter.taskLines.join('\n').trim(),
-          });
-        }
         // 提取标题：使用匹配到的内容，或从原始行中提取
         let title = match[1]?.trim() || '';
         if (!title) {
@@ -79,10 +114,26 @@ function parseChaptersFromContent(content: string): { title: string; task: strin
             .replace(/^\*{1,2}/, '').replace(/\*{1,2}$/, '')
             .trim();
         }
-        currentChapter = {
-          title: title || `第${chapters.length + 1}章`,
-          taskLines: [line],
-        };
+        title = title || `第${rawChapters.length + 1}章`;
+
+        // 去重检查：如果与上一个章节标题高度相似，合并而非新建
+        if (currentChapter && isDuplicate(currentChapter.title, title, currentChapter.rawLine, line)) {
+          // 合并：将当前行追加到上一个章节的描述中
+          currentChapter.taskLines.push(line);
+        } else {
+          // 保存上一个章节
+          if (currentChapter) {
+            rawChapters.push({
+              title: currentChapter.title,
+              taskLines: currentChapter.taskLines,
+            });
+          }
+          currentChapter = {
+            title,
+            taskLines: [line],
+            rawLine: line,
+          };
+        }
         matched = true;
         break;
       }
@@ -96,13 +147,19 @@ function parseChaptersFromContent(content: string): { title: string; task: strin
   
   // 保存最后一个章节
   if (currentChapter) {
-    chapters.push({
+    rawChapters.push({
       title: currentChapter.title,
-      task: currentChapter.taskLines.join('\n').trim(),
+      taskLines: currentChapter.taskLines,
     });
   }
   
-  return chapters;
+  // 过滤掉只有标题行没有实际内容的章节（可能是误匹配）
+  return rawChapters
+    .filter((ch) => ch.taskLines.length > 1 || ch.taskLines[0].length > 10)
+    .map((ch) => ({
+      title: ch.title,
+      task: ch.taskLines.join('\n').trim(),
+    }));
 }
 
 /** 章节状态 */
