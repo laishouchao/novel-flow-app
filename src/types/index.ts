@@ -350,20 +350,6 @@ export interface ProxySetting {
   httpsProxy?: string;
 }
 
-/** 授权码配置（简化 AI 接入） */
-export interface AuthorizationConfig {
-  /** 授权码（用作 API Key） */
-  authCode: string;
-  /** 代理服务地址 */
-  proxyBaseUrl: string;
-  /** 用户选择的模型名称，格式 provider/model */
-  selectedModel: string;
-  /** 温度参数 */
-  temperature: number;
-  /** 最大生成 token 数 */
-  maxTokens: number;
-}
-
 /** 应用全局配置 */
 export interface AppConfig {
   llmConfigs: LLMConfig[];
@@ -375,8 +361,6 @@ export interface AppConfig {
   recentProjects: string[];
   /** 自定义提示词覆盖（taskType -> 自定义内容） */
   customPrompts?: Record<string, string>;
-  /** 授权码配置（简化 AI 接入） */
-  authConfig?: AuthorizationConfig;
 }
 
 // ============================================================================
